@@ -502,6 +502,36 @@
     <p><strong>误区三："教师强制下模型在作弊，学不到真本事。"</strong>不。教师强制只是训练技巧：批改时仍然按"模型自己给出的概率分布"算 loss，惩罚一点不少。真正的代价是训练-推理分布不一致（exposure bias）——推理时模型没见过自己的错误输出，可能一步错步步错。这是序列模型的经典难题，有 scheduled sampling 等缓解手段，但教师强制仍是绝对主流。</p>
   </div>
 
+  <h3><span class="sec-no">7.15</span> 常见问题 FAQ</h3>
+
+  <details class="quiz">
+    <summary>FAQ 1 · 训练数据要不要人工标注？</summary>
+    <div class="quiz-body">
+      <p>不用，这正是语言模型最划算的地方。任务「预测下一个词」的答案天然写在文本里：「我 今天 心情 很」的下一个字本来就是「好」，文本既是题目也是答案。这种数据自带标签的训练方式叫<strong>自监督学习（self-supervised learning）</strong>（见 <a href="#ch07" class="xref">7.2 节</a>）。人工标注真正登场的场合是后续的「微调」与「对齐」（如 RLHF 教模型好好说话），那是后续章节的话题，不是预训练阶段的事。</p>
+    </div>
+  </details>
+
+  <details class="quiz">
+    <summary>FAQ 2 · 为什么 loss 降了不少，模型生成的句子还是不通？</summary>
+    <div class="quiz-body">
+      <p>两个原因。其一，训练目标是「每个位置的下一个词预测得准不准」，这是一个<strong>局部</strong>指标；而「整句话通不通」是全局质量，局部都对不代表全局连贯。其二，训练与推理的分布不一致：训练用教师强制，模型永远看到正确前缀；推理时它只能看到自己（可能已出错）的输出，一步错步步错——这叫<strong>暴露偏置（exposure bias）</strong>（呼应 <a href="#ch07" class="xref">7.3 节</a>与本章「常见误区」）。所以 loss 漂亮只是必要条件，生成质量还要看解码策略（<a href="#ch08" class="xref">第 8 章</a>）和更靠后的对齐训练。</p>
+    </div>
+  </details>
+
+  <details class="quiz">
+    <summary>FAQ 3 · 学习率为什么不能一直保持很大？</summary>
+    <div class="quiz-body">
+      <p>学习率是「每步迈多大」的闸门。步子太大，参数会在最优点两侧来回震荡，甚至一步跨过头直接发散——你可以在本章 7.11 的交互模拟器里把学习率拉到最大，亲眼看 loss 曲线起飞。训练后期模型已接近谷底，需要的是在谷底附近精细微调，大踏步只会反复踩过最低点。所以工程上的共识是：学习率是全部超参数里最敏感的一个，宁小勿大，且必须随训练进程衰减（见 <a href="#ch07" class="xref">7.8 节</a>）。</p>
+    </div>
+  </details>
+
+  <details class="quiz">
+    <summary>FAQ 4 · warmup 为什么先升后降，而不是直接固定一个好值？</summary>
+    <div class="quiz-body">
+      <p>「升」和「降」解决的是训练首尾两个不同阶段的问题。开局时参数全是随机数，梯度又大又乱，Adam 的动量与波动统计也没积累起来，此时学习率必须从接近 0 慢慢爬升（前 4000 步线性升温），用小碎步探路，否则一脚就被噪声带进沟里。等 Adam 统计量稳定后冲到峰值；之后进入「降」的阶段，按 step⁻⁰·⁵ 缓慢衰减，越接近谷底步子越小越稳。固定值两头不讨好：定高了开局崩，定低了后期慢——先升后降的曲线正是两头兼顾的折中（公式与手算见 <a href="#ch07" class="xref">7.8 节</a>）。</p>
+    </div>
+  </details>
+
   <details class="quiz">
     <summary>自测 1 · 词表有 5 个词，某位置模型给正确词的概率是 0.02。这一步的交叉熵损失约是多少？如果模型通过训练把它提到 0.8，loss 变成多少？</summary>
     <div class="quiz-body">

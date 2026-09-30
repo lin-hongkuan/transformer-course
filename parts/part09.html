@@ -597,7 +597,7 @@ logits = x[最后一个位置] · W_词表<br>
     </ul>
   </div>
 
-  <h3><span class="sec-no">9.1</span> 小结</h3>
+  <h3><span class="sec-no">9.10</span> 小结</h3>
   <ul>
     <li>Transformer 分化为三族：<strong>编码器-only（BERT，双向，完形填空 MLM，做理解）</strong>、<strong>解码器-only（GPT，因果掩码，下一词预测，做生成）</strong>、<strong>编码器-解码器（T5，文本到文本，做转换）</strong>。</li>
     <li>区分三族的钥匙是<mark>注意力掩码的形状</mark>：谁能看见谁。</li>
@@ -608,7 +608,7 @@ logits = x[最后一个位置] · W_词表<br>
     <li>下一步路线：重读论文 → CS224n/CS336 → 手撕 nanoGPT → 读 Llama 技术报告。</li>
   </ul>
 
-  <h3><span class="sec-no">9.2</span> 自测题</h3>
+  <h3><span class="sec-no">9.11</span> 自测题</h3>
 
   <details class="quiz">
     <summary>第 1 题：为什么 BERT 不适合直接用来「续写一段话」，而 GPT 可以？</summary>

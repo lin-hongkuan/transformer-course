@@ -480,6 +480,32 @@
     </ul>
   </div>
 
+  <h3><span class="sec-no">3.13</span> 常见问题 FAQ</h3>
+  <details class="quiz">
+    <summary>FAQ 1：Q、K、V 三个矩阵是怎么来的？是训练出来的吗？</summary>
+    <div class="quiz-body">
+      <p>是。<code class="math"><b>W</b><sub>Q</sub>、<b>W</b><sub>K</sub>、<b>W</b><sub>V</sub></code> 是模型的<mark>可学习参数</mark>：初始化时是随机数，训练过程（<a href="#ch07" class="xref">第 7 章</a>）里梯度下降把它们一步步调成有用的样子，训练完成后就固定下来。而 Q、K、V 本身不是参数，是用<strong>同一份输入 X</strong> 分别乘这三个矩阵算出来的投影——数据只有一份，角色有三种（3.3 节的"三顶帽子"）。所以准确的说法是：矩阵是学出来的，Q/K/V 是每次前向传播时临时算出来的。</p>
+    </div>
+  </details>
+  <details class="quiz">
+    <summary>FAQ 2：为什么 Q 和 K 相乘（点积）就能代表"相关性"？</summary>
+    <div class="quiz-body">
+      <p>点积在几何上等于两向量长度之积再乘夹角余弦，所以它度量的本质是<mark>方向有多一致</mark>：同向最大、垂直为零、反向为负。把注意力里的"相关性"定义成"Q 指向的方向与 K 指向的方向有多重合"就非常自然——训练的任务恰好是把 <code class="math"><b>W</b><sub>Q</sub>、<b>W</b><sub>K</sub></code> 调成"该互相寻找的词在这个空间里方向对齐"。另外点积只是一串乘加，是 GPU 最擅长的运算（3.5 节开头）。当然，"方向相似"只是相关性的<strong>一种</strong>定义，这正是下一章要用多个头并行多种标准的原因。</p>
+    </div>
+  </details>
+  <details class="quiz">
+    <summary>FAQ 3：注意力权重能当成模型决策的解释吗？</summary>
+    <div class="quiz-body">
+      <p>不能简单地当。权重只是整条计算链的中间一环——它后面还要乘 V、再过 W_O、残差、FFN 和后续很多层，某个权重很大不代表它对最终输出的贡献就大；学术界甚至有论文专门论证 "attention is not explanation"。正确的用法是把热力图当作<strong>线索</strong>：它能提示"模型可能在利用什么关系"，帮你提出假设，但要验证因果还得靠干预实验（比如遮住某个词看输出变不变）。3.8 节的警示框说的就是这个分寸。</p>
+    </div>
+  </details>
+  <details class="quiz">
+    <summary>FAQ 4：序列太长时注意力会怎么样？有什么办法？</summary>
+    <div class="quiz-body">
+      <p>注意力权重矩阵有 <code class="math">n²</code> 个格子，计算量和内存都随序列长度<strong>平方</strong>增长（3.11 节）：1 万词约 1 亿个格子还能忍，100 万词就是 1 万亿个格子，光存权重表就要 TB 级内存。这是 Transformer 的"阿喀琉斯之踵"。现代对策主要有几路：FlashAttention（不改变数学结果，只重排内存读写来省显存、提速）、稀疏/滑窗注意力（每个词只看局部或少数关键位置）、以及各种低秩近似。<a href="#ch09" class="xref">第 9 章</a>会展开讲这些技术。</p>
+    </div>
+  </details>
+
   <details class="quiz">
     <summary>自测 1：若 d_k 从 64 变成 256，缩放因子 √d_k 怎么变？不调整会发生什么？</summary>
     <div class="quiz-body">
