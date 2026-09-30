@@ -597,7 +597,341 @@ logits = x[最后一个位置] · W_词表<br>
     </ul>
   </div>
 
-  <h3><span class="sec-no">9.10</span> 小结</h3>
+  <h3><span class="sec-no">9.10</span> 附录 A · 一条样本的完整一生</h3>
+
+  <p>九章内容讲完，零件你都认识了。但你可能还有一个隐秘的疑问：<mark>这些零件到底是怎么串成一次真实的训练、又怎么串成一次真实的生成的？</mark>本附录只做一件事：挑一条最小的训练样本——翻译对「我爱你 → I love you」——从它还是语料库里的一行文字开始，一路跟到它推动参数更新，再跟到训练完成后模型为你逐词生成译文。全程使用 2017 年那台原始 Transformer（编码器 6 层 + 解码器 6 层、d_model=512、词表 37000），所有张量形状都是真实的；出现的概率数值是教学示意，会随文注明。</p>
+
+  <h4>A.1 样本的一生：五幕总览</h4>
+
+  <p>先看全景。这条样本的一生分五幕：出生（语料清洗）→ 编号入学（分词）→ 上课（训练 step）→ 毕业（保存权重）→ 工作（推理生成）。请记住一个关键区别：<strong>前四幕在训练阶段循环几十亿次，结束后权重只存档一次；第五幕则对之后每一次用户请求都重演一遍</strong>。</p>
+
+  <p>下面这个演示是本附录的主角：跟着这条样本一步一步走完全程。每一步都能看到此刻的输入是什么、张量什么形状、注意力正在读谁、输出流去哪里。建议先「播放全程」看一遍，再用「单步」慢慢回味。</p>
+
+  <div class="demo-frame" data-demo="demo-journey">正在加载交互演示…</div>
+
+  <div class="fig">
+    <svg viewBox="0 0 760 380" role="img" aria-label="一条训练样本的五幕生命周期时间线">
+      <defs>
+        <marker id="arr-apx1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"></path>
+        </marker>
+      </defs>
+
+      <text x="20" y="28" font-size="15" font-weight="bold" fill="var(--ink)" font-family="inherit">「我爱你 → I love you」的一生：五幕时间线</text>
+
+      <!-- act 1 -->
+      <rect x="10" y="48" width="140" height="220" rx="10" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <rect x="10" y="48" width="140" height="28" rx="10" fill="var(--accent)"></rect>
+      <text x="80" y="67" text-anchor="middle" font-size="11" font-weight="bold" fill="var(--paper2)" font-family="inherit">① 语料清洗</text>
+      <g font-size="9.5" font-family="inherit">
+        <text x="20" y="98" fill="var(--muted)">输入：原始网页语料</text>
+        <text x="20" y="120" fill="var(--ink)">去重、过滤低质句、</text>
+        <text x="20" y="135" fill="var(--ink)">对齐双语句对</text>
+        <text x="20" y="162" fill="var(--muted)">输出：干净平行句对</text>
+        <text x="20" y="184" font-weight="bold" fill="var(--accent)">我爱你 ⇆ I love you</text>
+        <text x="20" y="212" fill="var(--muted)">张量：还没有，</text>
+        <text x="20" y="227" fill="var(--muted)">只是两行文字</text>
+      </g>
+      <line x1="150" y1="158" x2="160" y2="158" stroke="var(--accent)" stroke-width="2" marker-end="url(#arr-apx1)"></line>
+
+      <!-- act 2 -->
+      <rect x="160" y="48" width="140" height="220" rx="10" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <rect x="160" y="48" width="140" height="28" rx="10" fill="var(--accent)"></rect>
+      <text x="230" y="67" text-anchor="middle" font-size="11" font-weight="bold" fill="var(--paper2)" font-family="inherit">② 分词 tokenize</text>
+      <g font-size="9.5" font-family="inherit">
+        <text x="170" y="98" fill="var(--muted)">输入：两行文字</text>
+        <text x="170" y="120" fill="var(--ink)">按词表切成 token</text>
+        <text x="170" y="135" fill="var(--ink)">并查表换成 id</text>
+        <text x="170" y="162" fill="var(--muted)">输出：两串数字</text>
+        <text x="170" y="184" fill="var(--accent)">源 [3]　目标 [4]</text>
+        <text x="170" y="212" fill="var(--muted)">每个 id 是一个</text>
+        <text x="170" y="227" fill="var(--muted)">整数，如 1024</text>
+      </g>
+      <line x1="300" y1="158" x2="310" y2="158" stroke="var(--accent)" stroke-width="2" marker-end="url(#arr-apx1)"></line>
+
+      <!-- act 3 -->
+      <rect x="310" y="48" width="150" height="220" rx="10" fill="var(--paper2)" stroke="var(--accent)" stroke-width="2"></rect>
+      <rect x="310" y="48" width="150" height="28" rx="10" fill="var(--accent)"></rect>
+      <text x="385" y="67" text-anchor="middle" font-size="11" font-weight="bold" fill="var(--paper2)" font-family="inherit">③ 训练一个 step</text>
+      <g font-size="9.5" font-family="inherit">
+        <text x="320" y="96" fill="var(--muted)">输入：源 id 与目标 id</text>
+        <text x="320" y="116" fill="var(--ink)">前向 [3×512]→[4×512]</text>
+        <text x="320" y="131" fill="var(--ink)">→ logits [4×37000]</text>
+        <text x="320" y="151" fill="var(--ink)">算损失：0.538</text>
+        <text x="320" y="171" fill="var(--ink)">反向传播求梯度</text>
+        <text x="320" y="191" fill="var(--ink)">Adam 更新全部参数</text>
+        <text x="320" y="218" fill="var(--muted)">输出：只比上一步</text>
+        <text x="320" y="233" fill="var(--muted)">好一丁点儿的模型</text>
+      </g>
+      <line x1="460" y1="158" x2="470" y2="158" stroke="var(--accent)" stroke-width="2" marker-end="url(#arr-apx1)"></line>
+
+      <!-- act 4 -->
+      <rect x="470" y="48" width="130" height="220" rx="10" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <rect x="470" y="48" width="130" height="28" rx="10" fill="var(--accent)"></rect>
+      <text x="535" y="67" text-anchor="middle" font-size="11" font-weight="bold" fill="var(--paper2)" font-family="inherit">④ 保存权重</text>
+      <g font-size="9.5" font-family="inherit">
+        <text x="480" y="98" fill="var(--muted)">输入：训练结束的</text>
+        <text x="480" y="113" fill="var(--muted)">全部参数</text>
+        <text x="480" y="140" fill="var(--ink)">写入磁盘文件</text>
+        <text x="480" y="155" fill="var(--ink)">（checkpoint）</text>
+        <text x="480" y="182" fill="var(--muted)">输出：一个权重</text>
+        <text x="480" y="197" fill="var(--muted)">文件，65M 个</text>
+        <text x="480" y="212" fill="var(--muted)">数字（base）</text>
+      </g>
+      <line x1="600" y1="158" x2="610" y2="158" stroke="var(--accent)" stroke-width="2" marker-end="url(#arr-apx1)"></line>
+
+      <!-- act 5 -->
+      <rect x="610" y="48" width="140" height="220" rx="10" fill="var(--paper2)" stroke="var(--accent2)" stroke-width="2"></rect>
+      <rect x="610" y="48" width="140" height="28" rx="10" fill="var(--accent2)"></rect>
+      <text x="680" y="67" text-anchor="middle" font-size="11" font-weight="bold" fill="var(--paper2)" font-family="inherit">⑤ 推理生成</text>
+      <g font-size="9.5" font-family="inherit">
+        <text x="620" y="98" fill="var(--muted)">输入：新句子</text>
+        <text x="620" y="113" fill="var(--muted)">「我爱你」</text>
+        <text x="620" y="140" fill="var(--ink)">编码器跑一遍</text>
+        <text x="620" y="160" fill="var(--ink)">解码器逐词生成</text>
+        <text x="620" y="175" fill="var(--ink)">I → love → you</text>
+        <text x="620" y="202" fill="var(--muted)">输出：一句译文</text>
+        <text x="620" y="222" fill="var(--accent2)">权重全程只读不改</text>
+      </g>
+
+      <!-- loop-back annotation -->
+      <path d="M385,268 C 385,310 230,310 230,272" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr-apx1)"></path>
+      <text x="305" y="330" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="inherit">一个 step 结束，回到 ② 取下一条样本 —— 重复几十亿次，才轮到 ④</text>
+
+      <rect x="30" y="344" width="700" height="30" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="50" y="364" font-size="10.5" fill="var(--muted)" font-family="inherit">记忆钩子：训练 = ①②③ 循环几十亿次后 ④ 存档一次；推理 = 每次请求都重演 ⑤，且权重只读不改。</text>
+    </svg>
+    <figcaption>图 9-4　一条样本的五幕生命周期。每一幕标注「输入是什么、张量什么形状、输出去哪」。虚线表示训练阶段的样本循环。</figcaption>
+  </div>
+
+  <h4>A.2 第一幕与第二幕：从网页到 token 序列</h4>
+
+  <p>真实场景里，「我爱你 ⇆ I love you」这样的平行句对来自大规模网页语料：爬虫抓回原始网页后，要先去重、过滤乱码与低质量内容、再用对齐算法把同一句话的两种语言配成一对——<strong>数据质量过滤</strong>是现代语料工程里极其重要的一环，垃圾进、垃圾出。我们假设它顺利通过了所有筛子，成为训练集里的一行。</p>
+
+  <p>接下来分词。<strong>诚实声明</strong>：真实模型用的是 BPE（字节对编码）子词分词，会把词切成更小的片段（比如「unbelievable」可能切成 un·believ·able）；为了让你看清全程，这里我们用<strong>简化的词级分词</strong>，一词一个编号。编号是我们自编的一组 id，本附录内保持一致：</p>
+
+  <ul>
+    <li>源句（中文）：「我 / 爱 / 你」→ id 序列 <code>[1024, 837, 2055]</code>，长度 3，即张量形状 <code>[3]</code>。</li>
+    <li>目标句（英文）：加上首尾特殊符号 <code>&lt;s&gt;</code>（开始）与 <code>&lt;/s&gt;</code>（结束），得到 5 个 token。训练时把它拆成<strong>错开一格</strong>的两条序列：</li>
+  </ul>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>位置</th><th>1</th><th>2</th><th>3</th><th>4</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>目标<strong>输入</strong>（喂给解码器）</td><td>&lt;s&gt;</td><td>I</td><td>love</td><td>you</td></tr>
+        <tr><td>目标<strong>标签</strong>（要预测的答案）</td><td>I</td><td>love</td><td>you</td><td>&lt;/s&gt;</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>看这张表：<mark>输入往右挪一格就是标签</mark>——这就是<strong>教师强制（teacher forcing）</strong>的关键设计。位置 1 输入 <code>&lt;s&gt;</code>、标签是 I，意思是「给你一个开始符，请预测第一个词」；位置 2 输入 I、标签是 love，意思是「已经生成了 I，请预测下一个词」……依此类推。两条序列长度都是 4（张量形状 <code>[4]</code>），这样一次前向就能同时出 4 道题、算 4 份损失，完全并行。</p>
+
+  <h4>A.3 第三幕上半场：这条样本的前向传播</h4>
+
+  <p>现在把这两串数字送进模型。一路记住张量形状的变化：</p>
+
+  <ol>
+    <li><strong>嵌入 + 位置编码</strong>：源侧 3 个 id 去嵌入矩阵里查 3 行，得到 <code>[3×512]</code>；目标侧 4 个 id 查 4 行，得到 <code>[4×512]</code>。各自逐元素加上位置编码（<a href="#ch02" class="xref">第 2 章</a>），形状不变。</li>
+    <li><strong>编码器 × 6 层</strong>：每一层里，自注意力的打分矩阵 Q·Kᵀ 是 <code>[3×3]</code>（每个源词对每个源词打分），softmax 后对 V 加权求和；FFN 把每行从 512 维升到 2048 维再降回来；两关之间都是 Add &amp; Norm。6 层走完，输出「笔记」 <strong>H</strong>，形状仍是 <code>[3×512]</code>——每行是对应源词「读完全句」之后的最终理解。</li>
+    <li><strong>解码器 × 6 层</strong>：掩码自注意力的打分矩阵是 <code>[4×4]</code>，上三角填 <code>-inf</code>（第 i 个位置不许偷看第 i+1 个及以后的标签）；交叉注意力的打分矩阵是 <code>[4×3]</code>——4 个目标位置各自去查询 3 行源笔记 H；再过 FFN。输出 <code>[4×512]</code>。</li>
+    <li><strong>输出头</strong>：<code>[4×512]</code> 乘上词表映射矩阵 <code>[512×37000]</code>，得到 logits <code>[4×37000]</code>；对每行做 softmax，4 个位置各得到一个 37000 维的概率分布。每个分布回答一个问题：「这个位置应该填词表里的哪个词？」</li>
+  </ol>
+
+  <p>把「注意力在读什么」写具体一点。假设解码器在位置 3（要预测 <strong>love</strong>）时，交叉注意力对三个源词「我 / 爱 / 你」的权重约为 <strong>(0.08, 0.74, 0.18)</strong>——也就是它主要在读「爱」那一行笔记，顺带参考「你」（英文里 love 的对象）。（<strong>数值为教学示意</strong>，真实权重由训练决定，但「英译时聚焦对应中文词」的模式是研究者们真实观察到的。）这正是第 6 章那句「交叉注意力是解码器回头看源句的窗口」的实例。</p>
+
+  <h4>A.4 第三幕下半场：这条样本的损失与参数更新（核心账）</h4>
+
+  <p>前向结束，手里有 4 个 37000 维分布；标签告诉我们 4 个位置的正确答案分别是 I、love、you、<code>&lt;/s&gt;</code>。交叉熵损失只看一件事的负对数：<strong>模型分给正确答案的概率 p</strong>，逐位置损失为 <code class="math">−ln(p)</code>。假设这条样本上前向给出的正确词概率如下（教学示意值）：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>位置</th><th>正确词</th><th>模型给的概率 p</th><th>损失 −ln(p)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>I</td><td>0.62</td><td>0.478</td></tr>
+        <tr><td>2</td><td>love</td><td>0.48</td><td>0.734</td></tr>
+        <tr><td>3</td><td>you</td><td>0.71</td><td>0.342</td></tr>
+        <tr><td>4</td><td>&lt;/s&gt;</td><td>0.55</td><td>0.598</td></tr>
+        <tr><td colspan="2"><strong>样本损失（4 个位置取平均）</strong></td><td>—</td><td><strong>0.538</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>核对一下直觉：位置 2 的 love 最没把握（p=0.48，刚过四成一），它的损失 0.734 最大——<mark>越不自信、错得越狠的位置，被惩罚得越重</mark>；位置 3 的 you 最有把握，损失最小。四个位置平均，这条样本的损失是 0.538。这一个数字，就是反向传播的「发令枪」。</p>
+
+  <h4>A.4.1 梯度到底在推什么：p − y 的手算</h4>
+
+  <p>反向传播的数学细节在第 7 章，这里只记一个极为漂亮的结论：<mark>softmax + 交叉熵组合起来，传到 logits 层的梯度恰好等于「预测概率减标准答案」，即 p − y</mark>。用一个 3 词迷你词表手算一遍（真实是 37000 维，结构完全一样）：设某位置 logits 经 softmax 后 p = (0.62, 0.25, 0.13)，正确词是第一个，即 y = (1, 0, 0)。则：</p>
+
+  <div class="formula">
+梯度 = p − y = (0.62 − 1,&nbsp; 0.25 − 0,&nbsp; 0.13 − 0) = (<strong>−0.38</strong>,&nbsp; +0.25,&nbsp; +0.13)
+  </div>
+
+  <p>读懂这三个数：梯度是「让损失上升的方向」，优化时要<strong>反着走</strong>。所以正确词的 logits 将被<strong>抬升 0.38 的力度</strong>，两个错误词分别被<strong>压低 0.25、0.13</strong>。再看妙处：抬升的力度是 p − 1 = −0.38——模型给正确词的概率越接近 1，这个数越接近 0，<mark>模型越自信，被推的力道越小；错得越离谱，被推得越狠</mark>。损失函数里那个「严厉但公平的老师」，在梯度层面就是这个简单的减法。</p>
+
+  <h4>A.4.2 一步 Adam 更新：轻轻推一把</h4>
+
+  <p>梯度沿计算图一路反传，每个权重都收到自己的「修正方向」。Adam 优化器（<a href="#ch07" class="xref">第 7 章</a>）再综合该权重历史梯度的一阶、二阶动量，执行一步更新：</p>
+
+  <div class="formula">
+θ ← θ − lr · m̂ / (√v̂ + ε)
+  </div>
+
+  <p>直觉版：这条样本让「爱 → love」这条通路上所有相关的权重——嵌入表里的行、6 层里相关的注意力投影和 FFN 权重、输出层 love 那一列——都被<strong>轻轻推了一把</strong>。为什么是「轻轻」？两个原因：学习率 lr 很小，而且梯度是整个 batch 的<strong>平均</strong>（原论文一个 batch 约 25000 个 token，这条样本只是其中 4 个）。给个数量级感觉：一次更新对单个权重的典型改变大约在 <strong>1e-5 量级</strong>（数量级示意）——一次几乎看不见，但几十亿次累积起来，就是模型从「随机乱猜」到「开口说人话」的全部秘密。同一台机器对整个 batch 同时做完这一切，然后回到 A.2，取下一条样本。</p>
+
+  <h4>A.5 第四幕与第五幕：毕业存档，然后上岗</h4>
+
+  <p>几十亿个 step 之后训练结束，全部参数（base 模型 65M 个数字）写入磁盘存档——这就是模型的「毕业照」。从此权重冻结，进入第五幕：<strong>推理</strong>。</p>
+
+  <p>推理时来了一条新请求「我爱你」。<mark>现在没有老师了</mark>：没有人知道正确译文，标签序列不存在，教师强制的错位输入无从谈起。编码器照常把「我 / 爱 / 你」跑一遍得到笔记 H；解码器则改为<strong>自回归</strong>模式（<a href="#ch08" class="xref">第 8 章</a>）：从一个 <code>&lt;s&gt;</code> 开始，每一步只生成一个词，把它拼回输入，再生成下一个：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>推理 step</th><th>解码器此刻的输入</th><th>输出分布选中</th><th>此刻注意力在读什么</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>[&lt;s&gt;]</td><td>I（0.62）</td><td>自注意力只能看 &lt;s&gt;；交叉注意力读全部 H，聚焦「我」</td></tr>
+        <tr><td>2</td><td>[&lt;s&gt;, I]</td><td>love（0.48）</td><td>自注意力看 &lt;s&gt;、I；交叉注意力聚焦「爱」（权重如 0.74）</td></tr>
+        <tr><td>3</td><td>[&lt;s&gt;, I, love]</td><td>you（0.71）</td><td>自注意力看已有 3 个前缀；交叉注意力聚焦「你」</td></tr>
+        <tr><td>4</td><td>[&lt;s&gt;, I, love, you]</td><td>&lt;/s&gt;（0.55）</td><td>读到 &lt;/s&gt;，停止——译文完成</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>（概率沿用 A.4 的示意值，假装训练后模型恰好学成这个样子。）注意两条铁律：<strong>解码自注意力每步只能看已生成的前缀</strong>（因果掩码还在），<strong>交叉注意力每步都能读整份 H</strong>（源句早就编码完，随时可查）。</p>
+
+  <p>把训练与推理并排对比，这是理解全书最容易混淆的地方之一：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th></th><th>训练（第三幕）</th><th>推理（第五幕）</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>解码器输入</td><td>真实标签错位一格（教师强制）</td><td>自己上一步刚生成的词</td></tr>
+        <tr><td>并行性</td><td>4 个位置一次前向全部算出，<strong>快</strong></td><td>一次只能出一个词，逐词串行，<strong>慢</strong></td>
+        <tr><td>权重</td><td>每个 step 都被梯度更新</td><td>全程只读，一个字节不改</td></tr>
+        <tr><td>加速手段</td><td>大批量并行、混合精度</td><td>KV Cache：历史词的 K、V 存起来，每步只为新词算注意力（<a href="#ch08" class="xref">第 8 章</a>的账）</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="fig">
+    <svg viewBox="0 0 760 300" role="img" aria-label="训练并行与推理串行对比图">
+      <defs>
+        <marker id="arr-apx2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"></path>
+        </marker>
+        <marker id="arr-apx3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent2)"></path>
+        </marker>
+      </defs>
+
+      <text x="30" y="30" font-size="14" font-weight="bold" fill="var(--ink)" font-family="inherit">同一句译文的两条生产路线：训练并行出题，推理串行生成</text>
+
+      <!-- training row -->
+      <rect x="30" y="52" width="700" height="96" rx="10" fill="var(--paper2)" stroke="var(--accent)" stroke-width="2"></rect>
+      <text x="50" y="78" font-size="12" font-weight="bold" fill="var(--accent)" font-family="inherit">训练：一次前向，4 道题同批批改</text>
+      <g font-size="10" font-family="inherit">
+        <rect x="60" y="94" width="120" height="36" rx="6" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="120" y="116" text-anchor="middle" fill="var(--ink)">输入 &lt;s&gt; I love you</text>
+        <line x1="180" y1="112" x2="240" y2="112" stroke="var(--accent)" stroke-width="2" marker-end="url(#arr-apx2)"></line>
+        <rect x="244" y="94" width="130" height="36" rx="6" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="309" y="109" text-anchor="middle" fill="var(--ink)">一次前向</text>
+        <text x="309" y="123" text-anchor="middle" fill="var(--muted)">[4×37000] logits</text>
+        <line x1="374" y1="112" x2="434" y2="112" stroke="var(--accent)" stroke-width="2" marker-end="url(#arr-apx2)"></line>
+        <rect x="438" y="94" width="130" height="36" rx="6" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="503" y="109" text-anchor="middle" fill="var(--ink)">对答案 I love you &lt;/s&gt;</text>
+        <text x="503" y="123" text-anchor="middle" fill="var(--muted)">损失 0.538</text>
+        <line x1="568" y1="112" x2="628" y2="112" stroke="var(--accent)" stroke-width="2" marker-end="url(#arr-apx2)"></line>
+        <rect x="632" y="94" width="86" height="36" rx="6" fill="var(--accent)"></rect>
+        <text x="675" y="116" text-anchor="middle" fill="var(--paper2)">反传 + Adam</text>
+      </g>
+
+      <!-- inference row -->
+      <rect x="30" y="168" width="700" height="112" rx="10" fill="var(--paper2)" stroke="var(--accent2)" stroke-width="2"></rect>
+      <text x="50" y="194" font-size="12" font-weight="bold" fill="var(--accent2)" font-family="inherit">推理：四次前向，一词接一词</text>
+      <g font-size="10" font-family="inherit">
+        <rect x="60" y="208" width="70" height="30" rx="6" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="95" y="227" text-anchor="middle" fill="var(--ink)">&lt;s&gt;</text>
+        <line x1="130" y1="223" x2="160" y2="223" stroke="var(--accent2)" stroke-width="2" marker-end="url(#arr-apx3)"></line>
+        <rect x="164" y="208" width="44" height="30" rx="6" fill="var(--accent2)"></rect>
+        <text x="186" y="227" text-anchor="middle" fill="var(--paper2)">I</text>
+        <path d="M186,238 C 186,258 240,258 240,240" fill="none" stroke="var(--accent2)" stroke-width="1.5" marker-end="url(#arr-apx3)"></path>
+        <rect x="242" y="208" width="96" height="30" rx="6" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="290" y="227" text-anchor="middle" fill="var(--ink)">&lt;s&gt; I</text>
+        <line x1="338" y1="223" x2="368" y2="223" stroke="var(--accent2)" stroke-width="2" marker-end="url(#arr-apx3)"></line>
+        <rect x="372" y="208" width="52" height="30" rx="6" fill="var(--accent2)"></rect>
+        <text x="398" y="227" text-anchor="middle" fill="var(--paper2)">love</text>
+        <path d="M398,238 C 398,258 452,258 452,240" fill="none" stroke="var(--accent2)" stroke-width="1.5" marker-end="url(#arr-apx3)"></path>
+        <rect x="454" y="208" width="120" height="30" rx="6" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="514" y="227" text-anchor="middle" fill="var(--ink)">&lt;s&gt; I love</text>
+        <line x1="574" y1="223" x2="604" y2="223" stroke="var(--accent2)" stroke-width="2" marker-end="url(#arr-apx3)"></line>
+        <rect x="608" y="208" width="44" height="30" rx="6" fill="var(--accent2)"></rect>
+        <text x="630" y="227" text-anchor="middle" fill="var(--paper2)">you</text>
+        <text x="676" y="227" font-size="11" fill="var(--muted)" font-family="inherit">→ &lt;/s&gt; 停</text>
+      </g>
+      <text x="60" y="264" font-size="10" fill="var(--muted)" font-family="inherit">弯箭头 = 把刚生成的词拼回输入；KV Cache 让每步不必重算历史词的 K、V。</text>
+    </svg>
+    <figcaption>图 9-5　训练与推理对比。上方训练：错位输入一次前向出 4 份损失；下方推理：自回归逐词生成，每步输出拼回输入。</figcaption>
+  </div>
+
+  <h4>A.6 一页纸数字地图</h4>
+
+  <p>最后，把这条样本一生经过的所有关键张量压进一张表。以后忘了任何一步，回来查这张「地图」：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>阶段</th><th>对象</th><th>形状 / 数值</th><th>含义</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>分词</td><td>源 token id</td><td>[3]</td><td>[1024, 837, 2055]，「我 / 爱 / 你」的编号</td></tr>
+        <tr><td>分词</td><td>目标输入 / 标签</td><td>[4] / [4]</td><td>错位一格：输入 &lt;s&gt; I love you，标签 I love you &lt;/s&gt;</td></tr>
+        <tr><td>嵌入 + PE</td><td>源 / 目标向量</td><td>[3×512] / [4×512]</td><td>查表得行向量，加位置编码</td></tr>
+        <tr><td>编码器 ×6</td><td>自注意力打分</td><td>[3×3]</td><td>每个源词对每个源词；FFN 内部 512→2048→512</td></tr>
+        <tr><td>编码器输出</td><td>笔记 H</td><td>[3×512]</td><td>源句的最终理解，供解码器随时查</td></tr>
+        <tr><td>解码器 ×6</td><td>掩码自注意力 / 交叉注意力</td><td>[4×4] / [4×3]</td><td>前者上三角 −inf；后者 4 个目标位置查 3 行 H</td></tr>
+        <tr><td>输出头</td><td>logits</td><td>[4×37000]</td><td>[4×512] × [512×37000]，softmax 后每行一个分布</td></tr>
+        <tr><td>损失</td><td>逐位置 −ln(p)</td><td>0.478 / 0.734 / 0.342 / 0.598</td><td>对应 p = 0.62 / 0.48 / 0.71 / 0.55（示意）</td></tr>
+        <tr><td>损失</td><td>样本损失</td><td><strong>0.538</strong></td><td>4 个位置取平均</td></tr>
+        <tr><td>反传</td><td>logits 层梯度</td><td>p − y</td><td>如 (−0.38, +0.25, +0.13)：抬正确词、压错误词</td></tr>
+        <tr><td>更新</td><td>单步权重改变</td><td>~1e-5 量级（示意）</td><td>Adam、小 lr、batch（约 25000 token）平均</td></tr>
+        <tr><td>推理</td><td>4 次自回归前向</td><td>逐步 [1]→[2]→[3]→[4]</td><td>I → love → you → &lt;/s&gt;，KV Cache 加速</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>至此，一条样本从出生到为你写出一句话的全过程都走完了——接下来就剩下全书的小结与自测题，去检验一下你是不是真的把每个零件都装进了脑子。</p>
+
+  <h3><span class="sec-no">9.11</span> 常见问题 FAQ</h3>
+
+  <details class="quiz">
+    <summary>BERT 能用来生成文章吗？为什么不行？</summary>
+    <p><strong>答：不能（至少不能自然地逐词生成）。</strong>两个层面的原因。① 训练目标不同：BERT 练的是「在完整上下文里猜被盖住的词」（完形填空 MLM），它从没练过「只看上文、预测下一个词」，直接拿来续写完全文不对题。② 架构不匹配：BERT 是双向注意力，每个位置都依赖「右边已经存在的词」；而生成是从左到右推进的，右边根本还没有词可看，双向注意力无从落地。GPT 类模型的因果掩码才天然匹配逐词生成。工程上确实有让 BERT 勉强生成文本的技巧（反复盖住再填），但质量与效率都远不如原生的解码器-only 模型。</p>
+  </details>
+
+  <details class="quiz">
+    <summary>参数越多越好吗？</summary>
+    <p><strong>答：不一定，「参数 × 数据 × 算力」要配套。</strong>规模定律只说损失随规模对数线性下降，但有两个前提被经常忽略：① 数据要跟上——Chinchilla 研究（2022）发现，给定算力预算，参数量与训练 token 数应大致同步增长（经验法则约每参数 20 个 token），只堆参数不喂数据反而浪费；② 成本是十进制跳涨的——每降同样一格损失，花费约涨 10 倍。此外还有推理成本：参数越多，每次回答越贵越慢。对小任务来说，一个「身材适中、博览群书」的模型往往比「块头巨大、读书太少」的模型更划算。</p>
+  </details>
+
+  <details class="quiz">
+    <summary>为什么现在的主流大模型都只用解码器了？编码器-解码器不是信息更全吗？</summary>
+    <p><strong>答：主要是简单与规模化的胜利。</strong>① 数据角度：「预测下一个词」这一个目标能吃下全网所有文本，不需要成对的「输入/输出」数据；编码器-解码器天然为两段式任务设计，喂通用语料反而别扭。② 结构角度：少一个编码器和整套交叉注意力，同样的参数与算力预算可以堆更多层、喂更多数据，正好踩中规模定律。③ 应用角度：聊天、写作、编程都能写成「续写」形式，T5 的任务前缀思想在解码器-only 上同样成立（就是今天的提示词）。编码器-解码器没有「错」——在翻译、摘要等输入输出界限分明的场景它仍是主力，只是在「通用生成」这个最大的战场上，更简单的形态跑赢了。</p>
+  </details>
+
+  <details class="quiz">
+    <summary>附录 A 里训练是「并行算 4 个位置」，推理却要一个词一个词生成——为什么推理不能像训练那样并行？</summary>
+    <p><strong>答：因为推理时没有「标准答案」可喂。</strong>训练之所以能并行，是教师强制提供了错位一格的真实标签：位置 i 的输入是真实的前 i 个词，4 个位置的输入一次性全部已知，自然能一次前向全部算出。推理时位置 i 的输入是模型自己刚生成的词——不先算出第 1 个词，就没有第 2 个位置的输入，环环相扣，只能串行。这是自回归模型的结构性代价，也是 KV Cache、投机采样（speculative decoding）等推理加速技术存在的意义：它们不改「串行」的本质，只是让每一步更便宜，或用小模型一次猜好几个词再让大模型批量验证。</p>
+  </details>
+
+  <h3><span class="sec-no">9.12</span> 小结</h3>
   <ul>
     <li>Transformer 分化为三族：<strong>编码器-only（BERT，双向，完形填空 MLM，做理解）</strong>、<strong>解码器-only（GPT，因果掩码，下一词预测，做生成）</strong>、<strong>编码器-解码器（T5，文本到文本，做转换）</strong>。</li>
     <li>区分三族的钥匙是<mark>注意力掩码的形状</mark>：谁能看见谁。</li>
@@ -608,7 +942,7 @@ logits = x[最后一个位置] · W_词表<br>
     <li>下一步路线：重读论文 → CS224n/CS336 → 手撕 nanoGPT → 读 Llama 技术报告。</li>
   </ul>
 
-  <h3><span class="sec-no">9.11</span> 自测题</h3>
+  <h3><span class="sec-no">9.13</span> 自测题</h3>
 
   <details class="quiz">
     <summary>第 1 题：为什么 BERT 不适合直接用来「续写一段话」，而 GPT 可以？</summary>

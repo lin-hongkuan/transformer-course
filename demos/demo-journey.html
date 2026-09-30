@@ -1,0 +1,499 @@
+<style>
+/* ===== demo-journey scoped styles（前缀 .dz-jr）===== */
+.dz-jr { font-family: var(--f-body); color: var(--ink); }
+.dz-jr * { box-sizing: border-box; }
+.dz-jr-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+.dz-jr-btn {
+  appearance: none; border: 1px solid var(--line); background: var(--paper3);
+  color: var(--ink); border-radius: 10px; padding: 10px 16px;
+  font: 600 .88rem/1 var(--f-body); cursor: pointer; min-height: 42px;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.dz-jr-btn:hover:not(:disabled), .dz-jr-btn:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+.dz-jr-btn:disabled { opacity: .45; cursor: not-allowed; }
+.dz-jr-btn.primary { background: var(--accent); color: var(--paper2); border-color: var(--accent); }
+.dz-jr-btn.primary:hover:not(:disabled) { color: var(--paper2); filter: brightness(1.08); }
+.dz-jr-count { font: 600 .8rem/1 var(--f-mono); color: var(--muted); margin-left: auto; }
+
+/* 五幕流水线（手机端横向滚动） */
+.dz-jr-pipewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 12px; }
+.dz-jr-pipe { display: flex; align-items: stretch; gap: 6px; min-width: 640px; }
+.dz-jr-stop {
+  flex: 1 1 0; appearance: none; border: 1.5px solid var(--line); background: var(--paper2);
+  border-radius: 10px; padding: 9px 8px; cursor: pointer; text-align: center;
+  font: 600 .78rem/1.45 var(--f-body); color: var(--muted); min-height: 44px;
+  transition: border-color .2s, color .2s, background .2s, box-shadow .2s;
+}
+.dz-jr-stop b { display: block; font: 700 .7rem/1.3 var(--f-mono); }
+.dz-jr-stop:hover { border-color: var(--accent); color: var(--accent); }
+.dz-jr-stop.cur { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.dz-jr-stop.done { border-color: var(--accent3); color: var(--accent3); }
+.dz-jr-arr { align-self: center; color: var(--muted); font-weight: 700; }
+
+.dz-jr-status {
+  font: 500 .85rem/1.6 var(--f-body); color: var(--ink);
+  border: 1px dashed var(--line); border-radius: 8px; padding: 10px 13px;
+  margin-bottom: 14px; min-height: 46px; background: var(--paper);
+}
+.dz-jr-status b { color: var(--accent2); }
+
+/* 舞台 */
+.dz-jr-stage { border: 1px solid var(--line); border-radius: 12px; background: var(--paper); padding: 18px; min-height: 320px; }
+.dz-jr-act[hidden] { display: none; }
+.dz-jr-act h4 { margin: 0 0 12px; font-size: 1rem; font-weight: 800; color: var(--accent); }
+.dz-jr-note { font-size: .8rem; color: var(--muted); line-height: 1.6; margin-top: 12px; }
+
+/* 逐步显现 */
+.dz-jr [data-r] { opacity: 0; transform: translateY(8px); transition: opacity .45s, transform .45s, border-color .3s, box-shadow .3s; }
+.dz-jr [data-r].vis { opacity: 1; transform: none; }
+
+/* 通用小零件 */
+.jr-cards { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 14px; }
+.jr-card { border: 1.5px solid var(--line); background: var(--paper2); border-radius: 10px; padding: 12px 16px; font-size: 1.05rem; font-weight: 700; }
+.jr-card small { display: block; font: 500 .7rem/1.4 var(--f-mono); color: var(--muted); margin-top: 4px; }
+.jr-swap { color: var(--accent2); font-weight: 800; font-size: 1.1rem; }
+.jr-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.jr-chip { border: 1.5px solid var(--line); background: var(--paper2); border-radius: 8px; padding: 8px 12px; font-weight: 700; font-size: .95rem; text-align: center; }
+.jr-chip.id { font: 700 .9rem/1.2 var(--f-mono); color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.jr-chip small { display: block; font: 500 .64rem/1.3 var(--f-mono); color: var(--muted); }
+.jr-chip.special { border-style: dashed; color: var(--muted); }
+.jr-tolabel { font: 600 .72rem/1 var(--f-mono); color: var(--muted); letter-spacing: .06em; margin-right: 4px; }
+.jr-glyph { color: var(--accent2); font-weight: 800; }
+
+/* 对位表 */
+.jr-shift { display: inline-block; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.jr-shift table { border-collapse: collapse; font: 600 .85rem/1.4 var(--f-body); }
+.jr-shift th, .jr-shift td { border: 1px solid var(--line); padding: 7px 13px; text-align: center; background: var(--paper2); }
+.jr-shift th { background: var(--paper3); color: var(--muted); font-size: .74rem; font-family: var(--f-mono); }
+.jr-shift td.hl { background: var(--accent-soft); color: var(--accent); font-weight: 800; }
+.jr-shift td.pad { color: var(--muted); background: var(--paper); }
+
+/* 流程框 */
+.jr-flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+.jr-box { border: 1.5px solid var(--line); background: var(--paper2); border-radius: 10px; padding: 9px 13px; font-weight: 700; font-size: .85rem; text-align: center; }
+.jr-box small { display: block; font: 500 .66rem/1.5 var(--f-mono); color: var(--muted); }
+.jr-box.hot { border-color: var(--accent2); background: var(--accent2-soft); box-shadow: 0 0 0 3px var(--accent2-soft); }
+.jr-box.acc { border-color: var(--accent); background: var(--accent-soft); }
+
+/* 热力图 */
+.jr-heat { display: inline-grid; gap: 3px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper2); }
+.jr-heat.g3 { grid-template-columns: repeat(3, 34px); }
+.jr-heat.g4 { grid-template-columns: repeat(4, 34px); }
+.jr-heat.g43 { grid-template-columns: repeat(3, 40px); }
+.jr-heat i {
+  height: 26px; border-radius: 5px; background: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font: 600 .58rem/1 var(--f-mono); color: var(--paper2); font-style: normal;
+}
+.jr-heat i.off { background: var(--paper3); color: var(--muted); }
+.jr-heat i.star { background: var(--accent2); }
+.jr-heatcap { font: 500 .72rem/1.5 var(--f-mono); color: var(--muted); margin-top: 6px; }
+
+/* 条形图 */
+.jr-bars { display: flex; flex-direction: column; gap: 7px; margin: 8px 0; max-width: 460px; }
+.jr-bar { display: grid; grid-template-columns: 92px 1fr 56px; gap: 8px; align-items: center; font: 600 .8rem/1.2 var(--f-body); }
+.jr-bar .tr { height: 16px; background: var(--paper3); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.jr-bar .fi { height: 100%; background: var(--accent); border-radius: 999px; transition: width .6s; }
+.jr-bar .fi.a2 { background: var(--accent2); }
+.jr-bar .fi.a3 { background: var(--accent3); }
+.jr-bar .vl { font: 700 .78rem/1 var(--f-mono); color: var(--muted); }
+.jr-mean { display: inline-block; margin-top: 8px; border: 1.5px solid var(--accent3); background: var(--accent2-soft); color: var(--ink); border-radius: 999px; padding: 7px 14px; font: 700 .82rem/1 var(--f-mono); }
+
+/* 梯度动画 */
+.jr-grad { display: flex; gap: 14px; align-items: flex-end; height: 130px; padding: 10px 14px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--paper2); max-width: 360px; }
+.jr-gcol { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 4px; }
+.jr-gcol .gb { width: 100%; border-radius: 6px 6px 0 0; background: var(--accent); transition: height .8s; }
+.jr-gcol .gl { font: 700 .68rem/1.3 var(--f-mono); color: var(--muted); text-align: center; }
+.jr-gcol .gd { font: 800 .78rem/1 var(--f-mono); min-height: 1em; }
+.jr-grad .g1 { height: 62%; }
+.jr-grad .g2 { height: 25%; }
+.jr-grad .g3 { height: 13%; }
+.jr-grad.after .g1 { height: 38%; background: var(--accent3); }
+.jr-grad.after .g2 { height: 50%; background: var(--accent2); }
+.jr-grad.after .g3 { height: 26%; background: var(--accent2); }
+.jr-grad .gd { opacity: 0; transition: opacity .5s; }
+.jr-grad.after .gd { opacity: 1; }
+.jr-gcol .dn { color: var(--accent3); }
+.jr-gcol .up { color: var(--accent2); }
+
+/* 保存卡片 / 生成序列 */
+.jr-save { border: 1.5px dashed var(--accent3); background: var(--paper2); border-radius: 12px; padding: 18px; text-align: center; max-width: 420px; }
+.jr-save .big { font: 800 1.5rem/1.2 var(--f-mono); color: var(--accent3); }
+.jr-gen { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0; }
+.jr-gword { border: 1.5px solid var(--line); background: var(--paper2); border-radius: 10px; padding: 10px 12px; min-width: 118px; }
+.jr-gword b { display: block; font-size: 1.05rem; color: var(--accent); }
+.jr-gword .pre { font: 500 .64rem/1.5 var(--f-mono); color: var(--muted); display: block; margin-bottom: 5px; }
+.jr-gword .tr { height: 9px; background: var(--paper3); border-radius: 999px; overflow: hidden; margin-top: 6px; }
+.jr-gword .fi { height: 100%; background: var(--accent2); border-radius: 999px; }
+.jr-gword .vl { font: 700 .68rem/1 var(--f-mono); color: var(--muted); }
+
+.dz-jr-err { font: 500 .85rem/1.6 var(--f-mono); color: var(--accent2); }
+@media (max-width: 640px) {
+  .dz-jr-stage { padding: 13px; }
+  .jr-heat.g4 { grid-template-columns: repeat(4, 28px); }
+}
+</style>
+
+<div class="dz-jr">
+  <div class="dz-jr-head">
+    <button type="button" class="dz-jr-btn primary" id="dz-jr-play">▶ 播放全程</button>
+    <button type="button" class="dz-jr-btn" id="dz-jr-prev">← 上一步</button>
+    <button type="button" class="dz-jr-btn" id="dz-jr-next">单步 →</button>
+    <button type="button" class="dz-jr-btn" id="dz-jr-reset">重置</button>
+    <span class="dz-jr-count" id="dz-jr-count"></span>
+  </div>
+
+  <div class="dz-jr-pipewrap">
+    <div class="dz-jr-pipe" id="dz-jr-pipe">
+      <button type="button" class="dz-jr-stop" data-act="0"><b>第一幕</b>① 语料与分词</button>
+      <span class="dz-jr-arr">→</span>
+      <button type="button" class="dz-jr-stop" data-act="1"><b>第二幕</b>② 训练·前向</button>
+      <span class="dz-jr-arr">→</span>
+      <button type="button" class="dz-jr-stop" data-act="2"><b>第三幕</b>③ 训练·损失与更新</button>
+      <span class="dz-jr-arr">→</span>
+      <button type="button" class="dz-jr-stop" data-act="3"><b>第四幕</b>④ 保存</button>
+      <span class="dz-jr-arr">→</span>
+      <button type="button" class="dz-jr-stop" data-act="4"><b>第五幕</b>⑤ 推理生成</button>
+    </div>
+  </div>
+
+  <div class="dz-jr-status" id="dz-jr-status"></div>
+
+  <div class="dz-jr-stage" id="dz-jr-stage">
+
+    <!-- ===== 第一幕：语料与分词 ===== -->
+    <section class="dz-jr-act" id="dz-jr-act1">
+      <h4>第一幕 · 语料与分词</h4>
+      <div class="jr-cards" data-r="0">
+        <div class="jr-card">我爱你<small>源句（中文）</small></div>
+        <span class="jr-swap">⇆</span>
+        <div class="jr-card">I love you<small>目标句（英文）</small></div>
+      </div>
+      <div class="jr-chips" data-r="1">
+        <span class="jr-tolabel">分词</span>
+        <span class="jr-chip">我</span><span class="jr-chip">爱</span><span class="jr-chip">你</span>
+        <span class="jr-glyph">→ 3 个词块</span>
+      </div>
+      <div class="jr-chips" data-r="2">
+        <span class="jr-tolabel">查词表</span>
+        <span class="jr-chip id">1024<small>我</small></span>
+        <span class="jr-chip id">837<small>爱</small></span>
+        <span class="jr-chip id">2055<small>你</small></span>
+        <span class="jr-glyph">→ id 序列 [3]</span>
+      </div>
+      <div class="jr-chips" data-r="3">
+        <span class="jr-tolabel">英文侧</span>
+        <span class="jr-chip special">&lt;s&gt;</span>
+        <span class="jr-chip">I</span><span class="jr-chip">love</span><span class="jr-chip">you</span>
+        <span class="jr-chip special">&lt;/s&gt;</span>
+      </div>
+      <div class="jr-shift" data-r="4">
+        <table>
+          <tr><th>目标输入 [4]</th><td class="hl">&lt;s&gt;</td><td>I</td><td>love</td><td>you</td><td class="pad">·</td></tr>
+          <tr><th>目标标签 [4]</th><td class="pad">·</td><td class="hl">I</td><td>love</td><td>you</td><td>&lt;/s&gt;</td></tr>
+        </table>
+      </div>
+      <p class="jr-note" data-r="4">输入整体往右挪一格就是标签（错位一格）——教师强制的关键：每个位置都只拿「前面的词」去预测「下一个词」。</p>
+    </section>
+
+    <!-- ===== 第二幕：训练·前向 ===== -->
+    <section class="dz-jr-act" id="dz-jr-act2">
+      <h4>第二幕 · 训练时的前向传播</h4>
+      <div class="jr-flow" data-r="0">
+        <div class="jr-box acc">源嵌入 + 位置<small>[3] → [3×512]</small></div>
+        <span class="jr-glyph">→</span>
+        <div class="jr-box acc">目标嵌入 + 位置<small>[4] → [4×512]</small></div>
+      </div>
+      <div class="jr-flow" data-r="1">
+        <div class="jr-box">编码器 ×6<small>自注意力 QKᵀ [3×3] · FFN 512→2048→512</small></div>
+        <div class="jr-heat g3" title="编码器自注意力热力图">
+          <i style="opacity:.9">.81</i><i style="opacity:.35">.12</i><i style="opacity:.25">.07</i>
+          <i style="opacity:.3">.09</i><i style="opacity:.95">.86</i><i style="opacity:.2">.05</i>
+          <i style="opacity:.25">.06</i><i style="opacity:.4">.18</i><i style="opacity:.9">.76</i>
+        </div>
+      </div>
+      <div class="jr-flow" data-r="2">
+        <div class="jr-box hot">理解笔记 H [3×512]<small>只算一遍，供解码器 6 层反复翻阅</small></div>
+      </div>
+      <div class="jr-flow" data-r="3">
+        <div class="jr-box">解码器 · 掩码自注意力<small>[4×4]，上三角 −∞ → 0</small></div>
+        <div class="jr-heat g4" title="掩码自注意力（下三角可见）">
+          <i style="opacity:1">1.0</i><i class="off">−∞</i><i class="off">−∞</i><i class="off">−∞</i>
+          <i style="opacity:.6">.55</i><i style="opacity:.55">.45</i><i class="off">−∞</i><i class="off">−∞</i>
+          <i style="opacity:.35">.28</i><i style="opacity:.5">.44</i><i style="opacity:.4">.28</i><i class="off">−∞</i>
+          <i style="opacity:.25">.21</i><i style="opacity:.35">.30</i><i style="opacity:.3">.26</i><i style="opacity:.3">.23</i>
+        </div>
+      </div>
+      <div class="jr-flow" data-r="4">
+        <div class="jr-box">交叉注意力<small>Q[4×512] · K,V 来自 H → 分数 [4×3]</small></div>
+        <div>
+          <div class="jr-heat g43" title="交叉注意力：4 个解码位置 × 我/爱/你">
+            <i style="opacity:.85">.72</i><i style="opacity:.3">.16</i><i style="opacity:.25">.12</i>
+            <i class="star" style="opacity:.2">.08</i><i class="star" style="opacity:1">.74</i><i class="star" style="opacity:.35">.18</i>
+            <i style="opacity:.2">.10</i><i style="opacity:.45">.30</i><i style="opacity:.8">.60</i>
+            <i style="opacity:.25">.15</i><i style="opacity:.3">.25</i><i style="opacity:.8">.60</i>
+          </div>
+          <div class="jr-heatcap">高亮行：预测 love 时读 → 我 0.08 / 爱 0.74 / 你 0.18（教学示意值）</div>
+        </div>
+      </div>
+      <div data-r="5">
+        <div class="jr-flow">
+          <div class="jr-box">输出头<small>[4×512] × [512×37000] → logits [4×37000] → softmax</small></div>
+        </div>
+        <div class="jr-bars">
+          <div class="jr-bar"><span>位置1 → I</span><div class="tr"><div class="fi" style="width:62%"></div></div><span class="vl">0.62</span></div>
+          <div class="jr-bar"><span>位置2 → love</span><div class="tr"><div class="fi" style="width:48%"></div></div><span class="vl">0.48</span></div>
+          <div class="jr-bar"><span>位置3 → you</span><div class="tr"><div class="fi" style="width:71%"></div></div><span class="vl">0.71</span></div>
+          <div class="jr-bar"><span>位置4 → &lt;/s&gt;</span><div class="tr"><div class="fi" style="width:55%"></div></div><span class="vl">0.55</span></div>
+        </div>
+        <p class="jr-note">每个位置各得到一个 37000 维分布，这里只画出「正确词」的概率（示意值）。</p>
+      </div>
+    </section>
+    <!-- ===== 第三幕：损失与更新 ===== -->
+    <section class="dz-jr-act" id="dz-jr-act3">
+      <h4>第三幕 · 这条样本的损失与参数更新</h4>
+      <div data-r="0">
+        <div class="jr-bars">
+          <div class="jr-bar"><span>位置1（I）</span><div class="tr"><div class="fi a2" style="width:47.8%"></div></div><span class="vl">0.478</span></div>
+          <div class="jr-bar"><span>位置2（love）</span><div class="tr"><div class="fi a2" style="width:73.4%"></div></div><span class="vl">0.734</span></div>
+          <div class="jr-bar"><span>位置3（you）</span><div class="tr"><div class="fi a2" style="width:34.2%"></div></div><span class="vl">0.342</span></div>
+          <div class="jr-bar"><span>位置4（&lt;/s&gt;）</span><div class="tr"><div class="fi a2" style="width:59.8%"></div></div><span class="vl">0.598</span></div>
+        </div>
+        <p class="jr-note">逐位置损失 = −ln p（正确词概率越低、损失越高）。注意 love 只有 0.48，所以它的损失最高。</p>
+      </div>
+      <div data-r="1"><span class="jr-mean">样本损失 = 平均 = (0.478+0.734+0.342+0.598) ÷ 4 = 0.538</span></div>
+      <div data-r="2">
+        <div class="jr-flow">
+          <div class="jr-box">某位置的 3 词迷你词表<small>softmax 概率 p = (0.62, 0.25, 0.13)</small></div>
+          <span class="jr-glyph">→</span>
+          <div class="jr-box">梯度 = p − y<small>y = (1, 0, 0) → (−0.38, 0.25, 0.13)</small></div>
+        </div>
+        <div class="jr-grad" id="dz-jr-grad">
+          <div class="jr-gcol"><span class="gd dn">↓ 0.38</span><div class="gb g1"></div><span class="gl">正确词<br>0.62</span></div>
+          <div class="jr-gcol"><span class="gd up">↑ 0.25</span><div class="gb g2"></div><span class="gl">错误词A<br>0.25</span></div>
+          <div class="jr-gcol"><span class="gd up">↑ 0.13</span><div class="gb g3"></div><span class="gl">错误词B<br>0.13</span></div>
+        </div>
+        <p class="jr-note">softmax+交叉熵的梯度恰为 p − y：正确词的 logit 被往上推（梯度 −0.38，往反方向走就是增大），错误词被往下压。模型越自信、推得越轻。</p>
+      </div>
+      <div class="jr-flow" data-r="3">
+        <div class="jr-box hot">θ ← θ − lr · m̂/(√v̂+ε)<small>一步 Adam 更新</small></div>
+        <span class="jr-glyph">→</span>
+        <div class="jr-box acc">这条样本把「爱→love」通路轻轻推了一把<small>单个权重的典型改变 ~1e-5（数量级示意）</small></div>
+      </div>
+    </section>
+
+    <!-- ===== 第四幕：保存 ===== -->
+    <section class="dz-jr-act" id="dz-jr-act4">
+      <h4>第四幕 · 保存权重</h4>
+      <div class="jr-save" data-r="0">
+        <div>checkpoint.pt</div>
+        <div class="big">63,000,000</div>
+        <div>约 63M 个浮点数写入磁盘</div>
+      </div>
+      <p class="jr-note" data-r="0">base 模型约 65M 参数（这里取数量级示意）。训练时对每个 batch（原论文约 25000 token）重复第二、三幕，然后把全部参数冻结成这一个文件。</p>
+    </section>
+
+    <!-- ===== 第五幕：推理生成 ===== -->
+    <section class="dz-jr-act" id="dz-jr-act5">
+      <h4>第五幕 · 推理：一个词一个词地生成</h4>
+      <div data-r="0">
+        <div class="jr-gword">
+          <span class="pre">step 1 · 输入 [&lt;s&gt;]</span>
+          <b>I</b>
+          <div class="tr"><div class="fi" style="width:62%"></div></div>
+          <span class="vl">P(I) = 0.62</span>
+        </div>
+      </div>
+      <div data-r="1">
+        <div class="jr-gword">
+          <span class="pre">step 2 · 输入 [&lt;s&gt;, I]</span>
+          <b>love</b>
+          <div class="tr"><div class="fi" style="width:48%"></div></div>
+          <span class="vl">P(love) = 0.48</span>
+        </div>
+      </div>
+      <div data-r="2">
+        <div class="jr-gword">
+          <span class="pre">step 3 · 输入 [&lt;s&gt;, I, love]</span>
+          <b>you</b>
+          <div class="tr"><div class="fi" style="width:71%"></div></div>
+          <span class="vl">P(you) = 0.71</span>
+        </div>
+      </div>
+      <div data-r="3">
+        <div class="jr-gword">
+          <span class="pre">step 4 · 输入 [&lt;s&gt;, I, love, you]</span>
+          <b>&lt;/s&gt;</b>
+          <div class="tr"><div class="fi" style="width:55%"></div></div>
+          <span class="vl">P(&lt;/s&gt;) = 0.55 → 停止</span>
+        </div>
+      </div>
+      <div class="jr-cards" data-r="4">
+        <div class="jr-card" style="border-color: var(--accent3)">译文：I love you<small>自回归循环 4 步完成</small></div>
+      </div>
+      <p class="jr-note" data-r="4">对比：训练时教师强制、一次并行算完 4 个位置；推理时没有老师，只能一个一个来，每步的分布都喂回输入再跑一遍（KV cache 帮忙提速——每步只需为新词算注意力）。</p>
+    </section>
+
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  try {
+    /* ---------- 单一事实源：所有数字只在这里出现一次 ---------- */
+    var DATA = {
+      srcTokens: ['我', '爱', '你'],
+      srcIds: [1024, 837, 2055],
+      tgtIn: ['<s>', 'I', 'love', 'you'],
+      tgtLabel: ['I', 'love', 'you', '</s>'],
+      correctProb: [0.62, 0.48, 0.71, 0.55],
+      losses: [0.478, 0.734, 0.342, 0.598],
+      meanLoss: 0.538,
+      crossAttnLove: { '我': 0.08, '爱': 0.74, '你': 0.18 },
+      vocab: 37000, dModel: 512, dFfn: 2048, layers: 6,
+      params: '约 63M 个浮点数'
+    };
+
+    var ACTS = ['语料与分词', '训练·前向', '训练·损失与更新', '保存', '推理生成'];
+
+    /* ---------- 步进表：act=幕，rev=该幕内揭示到的 data-r 值 ---------- */
+    var STEPS = [
+      { act: 0, rev: 0, say: '拿到一对平行句「我爱你 ⇆ I love you」（真实场景来自大规模清洗后的语料）。' },
+      { act: 0, rev: 1, say: '分词：源句切成 3 个词块「我 / 爱 / 你」（示意用简化的词级分词，真实模型用 BPE 子词）。' },
+      { act: 0, rev: 2, say: '查词表：3 个词块变成 id 序列 [1024, 837, 2055]，形状 [3]。' },
+      { act: 0, rev: 3, say: '英文侧加上特殊符号：<s> I love you </s>，共 5 个符号位。' },
+      { act: 0, rev: 4, say: '目标输入 vs 目标标签错位一格：输入 [<s>, I, love, you]，标签 [I, love, you, </s>]——教师强制的关键。' },
+      { act: 1, rev: 0, say: '嵌入 + 位置编码：源 id [3] 查表加成 [3×512]，目标 4 个符号变成 [4×512]。' },
+      { act: 1, rev: 1, say: '编码器 6 层开始读源句：每层自注意力的 QKᵀ 是 [3×3]（热力图亮一下），FFN 把每个位置 512→2048→512 加工。' },
+      { act: 1, rev: 2, say: '编码器输出理解笔记 H [3×512]——整次翻译只算这一遍，之后被解码器反复翻阅。' },
+      { act: 1, rev: 3, say: '解码器先做掩码自注意力：[4×4] 分数矩阵上三角加 −∞，softmax 后精确为 0——每个位置只能看自己和过去。' },
+      { act: 1, rev: 4, say: '交叉注意力 [4×3]：Q 问「写到哪了」，K/V 来自笔记 H。预测 love 时读：我 0.08 / 爱 0.74 / 你 0.18——主要在读「爱」。' },
+      { act: 1, rev: 5, say: '输出头：[4×512] × [512×37000] → logits [4×37000] → softmax。4 个位置的正确词概率：0.62 / 0.48 / 0.71 / 0.55。' },
+      { act: 2, rev: 0, say: '逐位置损失 −ln p：0.478 / 0.734 / 0.342 / 0.598。love 的概率最低（0.48），所以它的损失最高。' },
+      { act: 2, rev: 1, say: '这条样本的损失 = 四个位置的平均 = 0.538。' },
+      { act: 2, rev: 2, say: '梯度方向可视化：softmax+交叉熵的梯度 = p − y。正确词的条往下缩短（logit 往上推），错误词的条往上长一点。' },
+      { act: 2, rev: 3, say: '一步 Adam 更新 θ ← θ − lr·m̂/(√v̂+ε)：这条样本把「爱→love」通路轻轻推了一把（单个权重改变 ~1e-5 量级）。整个 batch 同时做这件事，然后取下一条。' },
+      { act: 3, rev: 0, say: '训练完成：约 63M 个浮点数写入磁盘，样本的训练阶段落幕。' },
+      { act: 4, rev: 0, say: '推理没有老师了。编码器照常得 H；解码器从 <s> 开始，step 1 选出概率最大的 I（0.62）。' },
+      { act: 4, rev: 1, say: 'step 2：把 I 追加回输入 [<s>, I]，再跑一遍 → love（0.48）。' },
+      { act: 4, rev: 2, say: 'step 3：输入 [<s>, I, love] → you（0.71）。' },
+      { act: 4, rev: 3, say: 'step 4：输入 [<s>, I, love, you] → </s>（0.55），遇到结束符，停止。' },
+      { act: 4, rev: 4, say: '译文「I love you」完成！训练时一次并行算完 4 个位置；推理只能一个一个来（KV cache 帮忙提速）。' }
+    ];
+
+    /* ---------- DOM ---------- */
+    var root = document.querySelector('.dz-jr');
+    if (!root) return;
+    var statusEl = root.querySelector('#dz-jr-status');
+    var countEl = root.querySelector('#dz-jr-count');
+    var btnPlay = root.querySelector('#dz-jr-play');
+    var btnPrev = root.querySelector('#dz-jr-prev');
+    var btnNext = root.querySelector('#dz-jr-next');
+    var btnReset = root.querySelector('#dz-jr-reset');
+    var stops = Array.prototype.slice.call(root.querySelectorAll('.dz-jr-stop'));
+    var acts = [];
+    for (var a = 0; a < 5; a++) acts.push(root.querySelector('#dz-jr-act' + (a + 1)));
+    var gradEl = root.querySelector('#dz-jr-grad');
+
+    var idx = -1;          // 当前步序号（-1 = 初始）
+    var timer = null;      // 自动播放 timer
+
+    /* 初始：隐藏五幕全部内容（stub 环境 classList 为空操作，无害） */
+    acts.forEach(function (el) {
+      var rs = el.querySelectorAll('[data-r]');
+      for (var i = 0; i < rs.length; i++) rs[i].classList.remove('vis');
+    });
+
+    function stopTimer() {
+      if (timer !== null) { clearInterval(timer); timer = null; }
+      btnPlay.textContent = '▶ 播放全程';
+    }
+
+    function apply() {
+      var cur = STEPS[idx];
+      acts.forEach(function (el, i) { el.hidden = (i !== cur.act); });
+      var rs = acts[cur.act].querySelectorAll('[data-r]');
+      for (var i = 0; i < rs.length; i++) {
+        rs[i].classList.toggle('vis', parseInt(rs[i].getAttribute('data-r'), 10) <= cur.rev);
+      }
+      if (gradEl) gradEl.classList.toggle('after', cur.act === 2 && cur.rev >= 2);
+      stops.forEach(function (s, i) {
+        s.classList.toggle('cur', i === cur.act);
+        s.classList.toggle('done', i < cur.act);
+      });
+      statusEl.innerHTML = '<b>第' + (idx + 1) + '/' + STEPS.length + '步 · 幕' + (cur.act + 1) + ' ' + ACTS[cur.act] + '</b>　' + cur.say;
+      countEl.textContent = (idx + 1) + ' / ' + STEPS.length;
+      if (idx >= STEPS.length - 1) {
+        stopTimer();
+        statusEl.innerHTML = '<b>这条样本的一生走完了 ✔</b>　' + cur.say + '　点「重置」或「← 上一步」可以回看。';
+      }
+      btnPrev.disabled = (idx <= 0);
+    }
+
+    function goNext() {
+      if (idx >= STEPS.length - 1) return;
+      idx++;
+      apply();
+    }
+
+    function goPrev() {
+      stopTimer();
+      if (idx <= 0) { reset(); return; }
+      idx--;
+      apply();
+    }
+
+    function reset() {
+      stopTimer();
+      idx = -1;
+      acts.forEach(function (el, i) {
+        el.hidden = (i !== 0);
+        var rs = el.querySelectorAll('[data-r]');
+        for (var k = 0; k < rs.length; k++) rs[k].classList.remove('vis');
+      });
+      if (gradEl) gradEl.classList.remove('after');
+      stops.forEach(function (s) { s.classList.remove('cur', 'done'); });
+      btnPlay.disabled = false;
+      btnNext.disabled = false;
+      btnPrev.disabled = true;
+      statusEl.innerHTML = '跟着训练样本「<b>我爱你 → I love you</b>」走完它的一生：分词 → 训练前向 → 损失与参数更新 → 保存 → 推理生成。点「单步 →」或「播放全程」开始。';
+      countEl.textContent = '0 / ' + STEPS.length;
+    }
+
+    function play() {
+      if (timer !== null) { stopTimer(); return; }  // 播放中再点 = 暂停
+      if (idx >= STEPS.length - 1) reset();
+      if (idx < 0) goNext();
+      btnPlay.textContent = '⏸ 暂停';
+      timer = setInterval(function () {
+        if (idx >= STEPS.length - 1) { stopTimer(); return; }
+        goNext();
+      }, 1600);
+    }
+
+    function jumpTo(act) {
+      stopTimer();
+      for (var i = 0; i < STEPS.length; i++) {
+        if (STEPS[i].act === act) { idx = i; apply(); return; }
+      }
+    }
+
+    btnPlay.addEventListener('click', play);
+    btnNext.addEventListener('click', function () { stopTimer(); goNext(); });
+    btnPrev.addEventListener('click', goPrev);
+    btnReset.addEventListener('click', reset);
+    stops.forEach(function (s) {
+      s.addEventListener('click', function () {
+        jumpTo(parseInt(s.getAttribute('data-act'), 10));
+      });
+    });
+
+    reset();
+  } catch (err) {
+    var r = document.querySelector('.dz-jr');
+    if (r) {
+      r.innerHTML = '<p class="dz-jr-err">演示初始化失败：' + String(err && err.message ? err.message : err) + '</p>';
+    }
+  }
+})();
+</script>
