@@ -1,0 +1,483 @@
+﻿<style>
+/* ===== demo-architecture scoped styles（前缀 .dz-arch）===== */
+.dz-arch { font-family: var(--f-body); color: var(--ink); }
+.dz-arch * { box-sizing: border-box; }
+.dz-arch-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+.dz-arch-btn {
+  appearance: none; border: 1px solid var(--line); background: var(--paper3);
+  color: var(--ink); border-radius: 10px; padding: 10px 18px;
+  font: 600 .9rem/1 var(--f-body); cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+  min-height: 42px;
+}
+.dz-arch-btn:hover:not(:disabled), .dz-arch-btn:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+.dz-arch-btn:disabled { opacity: .45; cursor: not-allowed; }
+.dz-arch-btn.primary { background: var(--accent); color: var(--paper2); border-color: var(--accent); }
+.dz-arch-btn.primary:hover:not(:disabled) { color: var(--paper2); filter: brightness(1.08); }
+.dz-arch-status {
+  font: 500 .82rem/1.5 var(--f-mono); color: var(--muted);
+  border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px;
+  margin-bottom: 14px; min-height: 34px;
+}
+.dz-arch-status b { color: var(--accent2); }
+.dz-arch-body { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 760px) { .dz-arch-body { grid-template-columns: minmax(0, 1fr); } }
+
+/* 架构图：手机上横向滚动 */
+.dz-arch-mapwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); padding: 14px; }
+.dz-arch-map { display: grid; grid-template-columns: 210px 74px 210px; gap: 0 8px; min-width: 520px; margin-inline: auto; width: max-content; }
+.dz-arch-lane { display: flex; flex-direction: column-reverse; gap: 8px; }
+.dz-arch-mid { display: flex; flex-direction: column; justify-content: center; align-items: center; }
+.dz-arch-lane-title {
+  text-align: center; font: 700 .78rem/1.4 var(--f-mono); letter-spacing: .08em;
+  color: var(--accent); padding: 4px 0;
+}
+.dz-arch-lane.dec .dz-arch-lane-title { color: var(--accent2); }
+
+.dz-arch-mod {
+  border: 1.5px solid var(--line); background: var(--paper2); border-radius: 9px;
+  padding: 8px 10px; cursor: pointer; text-align: center;
+  transition: border-color .2s, box-shadow .2s, transform .15s, background .2s;
+  user-select: none;
+}
+.dz-arch-mod:hover { border-color: var(--accent); transform: translateY(-1px); }
+.dz-arch-mod:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dz-arch-mod .m-name { display: block; font-size: .82rem; font-weight: 700; line-height: 1.35; }
+.dz-arch-mod .m-io { display: block; font: 400 .68rem/1.5 var(--f-mono); color: var(--muted); }
+.dz-arch-mod.accent2 { border-style: dashed; border-color: var(--accent2); }
+.dz-arch-mod.io-node { background: var(--paper3); }
+
+/* 栈容器 */
+.dz-arch-stack {
+  border: 1.5px dashed var(--accent); border-radius: 11px; padding: 8px;
+  display: flex; flex-direction: column-reverse; gap: 8px; background: var(--accent-soft);
+}
+.dz-arch-lane.dec .dz-arch-stack { border-color: var(--accent2); background: var(--accent2-soft); }
+.dz-arch-stack .s-label { text-align: center; font: 700 .72rem/1.4 var(--f-mono); color: var(--accent); }
+.dz-arch-lane.dec .dz-arch-stack .s-label { color: var(--accent2); }
+
+/* 中间桥 */
+.dz-arch-bridge {
+  border: 1.5px solid var(--accent); background: var(--accent-soft); border-radius: 9px;
+  padding: 10px 6px; cursor: pointer; text-align: center;
+  font-size: .74rem; font-weight: 700; line-height: 1.5; color: var(--accent-ink);
+  writing-mode: horizontal-tb; transition: box-shadow .2s, border-color .2s;
+}
+.dz-arch-bridge .m-io { display: block; font: 400 .66rem/1.5 var(--f-mono); color: var(--muted); }
+.dz-arch-bridge:hover { box-shadow: var(--shadow); }
+
+/* 播放高亮 */
+.dz-arch .on {
+  border-color: var(--accent2) !important; background: var(--accent2-soft) !important;
+  box-shadow: 0 0 0 3px var(--accent2-soft), 0 0 18px var(--accent2-soft) !important;
+}
+.dz-arch .on .m-name { color: var(--accent2); }
+.dz-arch .done { border-color: var(--accent3); }
+.dz-arch .done .m-name { color: var(--accent3); }
+.dz-arch .sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* 详情面板 */
+.dz-arch-detail {
+  border: 1px solid var(--line); border-radius: 12px; background: var(--paper2);
+  padding: 16px 18px; min-height: 240px; position: sticky; top: 8px;
+}
+.dz-arch-detail h4 { margin: 0 0 4px; font-size: 1.02rem; font-weight: 800; }
+.dz-arch-detail .d-tag { display: inline-block; font: 600 .68rem/1 var(--f-mono); color: var(--accent2); background: var(--accent2-soft); border-radius: 999px; padding: 4px 9px; margin: 0 0 10px; }
+.dz-arch-detail p { font-size: .88rem; line-height: 1.75; margin: 0 0 10px; color: var(--ink); }
+.dz-arch-detail .d-io { font: 500 .78rem/1.7 var(--f-mono); background: var(--paper3); border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; margin: 0 0 10px; color: var(--accent-ink); }
+.dz-arch-detail .d-link { font-size: .84rem; }
+.dz-arch-detail .d-link a { color: var(--accent); font-weight: 600; text-decoration: none; border-bottom: 1px dashed var(--accent); }
+.dz-arch-err { font: 500 .85rem/1.6 var(--f-mono); color: var(--accent2); }
+.dz-arch-hint { font-size: .78rem; color: var(--muted); margin-top: 12px; }
+</style>
+
+<div class="dz-arch">
+  <div class="dz-arch-head">
+    <button type="button" class="dz-arch-btn primary" id="dz-arch-play">▶ 播放数据流</button>
+    <button type="button" class="dz-arch-btn" id="dz-arch-step">单步 →</button>
+    <button type="button" class="dz-arch-btn" id="dz-arch-reset">重置</button>
+  </div>
+  <div class="dz-arch-status" id="dz-arch-status">点击图中任意模块查看详情，或点「播放数据流」看「我爱你 → I love you」的完整旅程。</div>
+
+  <div class="dz-arch-body">
+    <div class="dz-arch-mapwrap">
+      <div class="dz-arch-map">
+        <!-- 编码器列（column-reverse：视觉上自下而上流动） -->
+        <div class="dz-arch-lane enc">
+          <div class="dz-arch-lane-title">编码器</div>
+          <div class="dz-arch-mod io-node" data-mod="src-input" tabindex="0" role="button">
+            <span class="m-name">源句输入</span><span class="m-io">我 爱 你 · [3]</span>
+          </div>
+          <div class="dz-arch-mod" data-mod="src-embed" tabindex="0" role="button">
+            <span class="m-name">词嵌入</span><span class="m-io">[3] → [3×512]</span>
+          </div>
+          <div class="dz-arch-mod" data-mod="src-pos" tabindex="0" role="button">
+            <span class="m-name">+ 位置编码</span><span class="m-io">[3×512] → [3×512]</span>
+          </div>
+          <div class="dz-arch-stack">
+            <div class="s-label">编码器层 ×6（结构同、参数各自独立）</div>
+            <div class="dz-arch-mod" data-mod="enc-attn" tabindex="0" role="button">
+              <span class="m-name">多头自注意力</span><span class="m-io">[3×512] → [3×512] · 无掩码</span>
+            </div>
+            <div class="dz-arch-mod" data-mod="enc-an1" tabindex="0" role="button">
+              <span class="m-name">Add &amp; Norm</span><span class="m-io">[3×512] → [3×512]</span>
+            </div>
+            <div class="dz-arch-mod" data-mod="enc-ffn" tabindex="0" role="button">
+              <span class="m-name">前馈网络 FFN</span><span class="m-io">512 → 2048 → 512</span>
+            </div>
+            <div class="dz-arch-mod" data-mod="enc-an2" tabindex="0" role="button">
+              <span class="m-name">Add &amp; Norm</span><span class="m-io">[3×512] → [3×512]</span>
+            </div>
+          </div>
+          <div class="dz-arch-mod io-node" data-mod="enc-out" tabindex="0" role="button">
+            <span class="m-name">理解笔记（编码器输出）</span><span class="m-io">[3×512] · 只算一次</span>
+          </div>
+        </div>
+
+        <!-- 中间桥 -->
+        <div class="dz-arch-mid">
+          <div class="dz-arch-bridge" data-mod="bridge" tabindex="0" role="button">
+            K、V<br>→<br>送入每层<br>交叉注意力
+            <span class="m-io">[3×512]</span>
+          </div>
+        </div>
+
+        <!-- 解码器列 -->
+        <div class="dz-arch-lane dec">
+          <div class="dz-arch-lane-title">解码器</div>
+          <div class="dz-arch-mod io-node" data-mod="tgt-input" tabindex="0" role="button">
+            <span class="m-name">已生成译文</span><span class="m-io">&lt;s&gt; I · [2]</span>
+          </div>
+          <div class="dz-arch-mod" data-mod="tgt-embed" tabindex="0" role="button">
+            <span class="m-name">词嵌入 + 位置</span><span class="m-io">[2] → [2×512]</span>
+          </div>
+          <div class="dz-arch-stack">
+            <div class="s-label">解码器层 ×6</div>
+            <div class="dz-arch-mod accent2" data-mod="dec-mask" tabindex="0" role="button">
+              <span class="m-name">掩码多头自注意力</span><span class="m-io">[2×512] · 不许看未来</span>
+            </div>
+            <div class="dz-arch-mod" data-mod="dec-an1" tabindex="0" role="button">
+              <span class="m-name">Add &amp; Norm</span><span class="m-io">[2×512] → [2×512]</span>
+            </div>
+            <div class="dz-arch-mod accent2" data-mod="dec-cross" tabindex="0" role="button">
+              <span class="m-name">交叉注意力</span><span class="m-io">Q[2×512] · K,V[3×512] → [2×512]</span>
+            </div>
+            <div class="dz-arch-mod" data-mod="dec-an2" tabindex="0" role="button">
+              <span class="m-name">Add &amp; Norm</span><span class="m-io">[2×512] → [2×512]</span>
+            </div>
+            <div class="dz-arch-mod" data-mod="dec-ffn" tabindex="0" role="button">
+              <span class="m-name">前馈网络 FFN</span><span class="m-io">512 → 2048 → 512</span>
+            </div>
+            <div class="dz-arch-mod" data-mod="dec-an3" tabindex="0" role="button">
+              <span class="m-name">Add &amp; Norm</span><span class="m-io">[2×512] → [2×512]</span>
+            </div>
+          </div>
+          <div class="dz-arch-mod" data-mod="dec-linear" tabindex="0" role="button">
+            <span class="m-name">线性层</span><span class="m-io">[2×512] → [2×37000]</span>
+          </div>
+          <div class="dz-arch-mod" data-mod="dec-softmax" tabindex="0" role="button">
+            <span class="m-name">Softmax</span><span class="m-io">取最后一行 → [37000] 概率</span>
+          </div>
+          <div class="dz-arch-mod io-node" data-mod="dec-output" tabindex="0" role="button">
+            <span class="m-name">输出：love（0.71）</span><span class="m-io">追加回输入，再跑一遍</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dz-arch-detail" id="dz-arch-detail">
+      <h4>点一个模块试试</h4>
+      <span class="d-tag">待选择</span>
+      <p>左边的图就是本章图 6-1 的可点击版本。点击任意模块（或 Tab 键聚焦后回车），这里会展开它的通俗解释、输入输出形状，以及它在讲义哪一章有完整推导。</p>
+      <p class="dz-arch-hint">提示：手机上架构图可以左右滑动。</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  try {
+    /* ---------- 模块信息表 ---------- */
+    var INFO = {
+      'src-input': {
+        name: '源句输入', tag: '数据起点',
+        text: '翻译任务的原句「我 爱 你」。分词后每个词对应词表里的一个编号（如 1543、6821、203）。此时只是 3 个整数，模型还「不认识」这些词。',
+        io: '形状：[3]（3 个词表编号）',
+        ch: 'ch02', chName: '第 2 章 · 词嵌入与位置编码'
+      },
+      'src-embed': {
+        name: '词嵌入（编码器侧）', tag: '来自第 2 章',
+        text: '拿编号去 37000×512 的嵌入大表里「查字典」，每个词换到一行 512 维向量。向量间的距离编码语义：意思相近的词，向量也相近。此刻每个词只有字面意思，还不知道上下文。',
+        io: '输入 [3] → 输出 [3×512]',
+        ch: 'ch02', chName: '第 2 章 · 词嵌入与位置编码'
+      },
+      'src-pos': {
+        name: '+ 位置编码', tag: '来自第 2 章',
+        text: '注意力本身看不出词的先后顺序（「我爱你」和「你爱我」对它一样），所以逐元素加上正弦位置编码，让每个向量同时携带「我是谁」和「我排第几」。原论文用公式现算，不占参数。',
+        io: '[3×512] + [3×512] → [3×512]（形状不变）',
+        ch: 'ch02', chName: '第 2 章 · 词嵌入与位置编码'
+      },
+      'enc-attn': {
+        name: '多头自注意力（编码器）', tag: '来自第 3、4 章',
+        text: '每个词用自己的 Q 去匹配全句所有词的 K，按相关性加权混合它们的 V。8 个头各看 [3×64]，捕捉不同关系，拼回 [3×512]。编码器侧没有掩码——理解阶段，全句可见。经过这里，「爱」的向量变成「主语是我、宾语是你的那个爱」。',
+        io: '[3×512] → [3×512]（每头 [3×64]，h=8）',
+        ch: 'ch04', chName: '第 4 章 · 多头注意力'
+      },
+      'enc-an1': {
+        name: 'Add & Norm（其一）', tag: '来自第 5 章',
+        text: 'Add：把子层输出和它的输入相加（残差连接，梯度的「高速公路」）；Norm：层归一化，把每个位置 512 个数值压回均值 0、方差 1 附近再缩放平移，防止深层网络数值失控。',
+        io: 'Add: [3×512] + [3×512]；Norm 后仍 [3×512]',
+        ch: 'ch05', chName: '第 5 章 · 前馈网络与残差/层归一化'
+      },
+      'enc-ffn': {
+        name: '前馈网络 FFN（编码器）', tag: '来自第 5 章',
+        text: '对每个位置独立做「升维思考再降维」：512 → 2048（ReLU）→ 512。词与词之间不再交流，是对每个词向量的一次深度加工。它是层内的参数大户：2×512×2048 ≈ 2.1M，占一层参数的 2/3。',
+        io: '[3×512] → [3×2048] → [3×512]',
+        ch: 'ch05', chName: '第 5 章 · 前馈网络与残差/层归一化'
+      },
+      'enc-an2': {
+        name: 'Add & Norm（其二）', tag: '来自第 5 章',
+        text: 'FFN 之后再来一次残差 + 层归一化，第 1 个编码器层到此结束。同样的流程再重复 5 次（共 6 层，参数各自独立），文稿每过一层就被提炼一分。',
+        io: '[3×512] → [3×512]，然后进入下一层',
+        ch: 'ch05', chName: '第 5 章 · 前馈网络与残差/层归一化'
+      },
+      'enc-out': {
+        name: '理解笔记（编码器最终输出）', tag: '本章',
+        text: '6 层加工后得到的 3 个向量，每个都是对应中文词在全句上下文中的浓缩表示——这就是写给解码器的「理解笔记」。整次翻译中它只计算一遍，之后被解码器 6 层的交叉注意力反复翻阅。',
+        io: '[3×512]，固定不变，供解码器所有层使用',
+        ch: 'ch06', chName: '第 6 章 · 完整架构（本章）'
+      },
+      'bridge': {
+        name: 'K、V 桥梁', tag: '本章核心',
+        text: '左右两半唯一的信息通道。每一层交叉注意力用自己的投影矩阵，把这份 [3×512] 笔记变换成该层专用的 K（检索目录）和 V（内容）。笔记本身不重算，投影每层不同。',
+        io: '笔记 [3×512] → 每层 K、V 各 [3×512]',
+        ch: 'ch06', chName: '第 6 章 · 交叉注意力（本章）'
+      },
+      'tgt-input': {
+        name: '已生成译文', tag: '自回归',
+        text: '解码器从右往左「写」。此刻已经写出「<s> I」，正要预测下一个词。预测出的词会追加回这里，再跑一遍——这种「用自己上一步的输出当下一步输入」的方式叫自回归（第 8 章细讲）。',
+        io: '形状：[2]（&lt;s&gt; 和 I 两个编号）',
+        ch: 'ch08', chName: '第 8 章 · 推理与解码策略'
+      },
+      'tgt-embed': {
+        name: '词嵌入 + 位置（解码器侧）', tag: '来自第 2 章',
+        text: '和编码器侧同样的两步：查嵌入表、加位置编码。英文有自己的嵌入表（或与中文共享，取决于词表方案）。',
+        io: '[2] → [2×512]，加位置后形状不变',
+        ch: 'ch02', chName: '第 2 章 · 词嵌入与位置编码'
+      },
+      'dec-mask': {
+        name: '掩码多头自注意力', tag: '本章核心',
+        text: '和编码器的自注意力几乎一样，唯一区别：给分数矩阵上三角加 −∞，softmax 后上三角精确为 0——每个位置只能看自己和过去，不许偷看还没写出的词。像考试时只用前面题的草稿。8 个头，每头 [2×64]。',
+        io: '[2×512] → [2×512]，掩码矩阵 [2×2]：[[0, −∞], [0, 0]]',
+        ch: 'ch06', chName: '第 6 章 · 掩码自注意力（本章）'
+      },
+      'dec-an1': {
+        name: 'Add & Norm（解码器·一）', tag: '来自第 5 章',
+        text: '掩码自注意力后的残差相加 + 层归一化。解码器每层有 3 组 Add &amp; Norm，这是第一组。',
+        io: '[2×512] → [2×512]',
+        ch: 'ch05', chName: '第 5 章 · 前馈网络与残差/层归一化'
+      },
+      'dec-cross': {
+        name: '交叉注意力', tag: '本章核心',
+        text: '翻译官回头查原句的动作：Q 来自解码器（「我现在写到哪、想表达什么」），K、V 来自编码器的理解笔记。分数矩阵 [2×3]：「&lt;s&gt;、I 各自对 我/爱/你 的关注分布」。中文信息在此正式进入英文生成。',
+        io: 'Q [2×512] × Kᵀ [512×3] → 分数 [2×3] → 输出 [2×512]',
+        ch: 'ch06', chName: '第 6 章 · 交叉注意力（本章）'
+      },
+      'dec-an2': {
+        name: 'Add & Norm（解码器·二）', tag: '来自第 5 章',
+        text: '交叉注意力后的残差 + 层归一化，稳定数值，准备进入 FFN。',
+        io: '[2×512] → [2×512]',
+        ch: 'ch05', chName: '第 5 章 · 前馈网络与残差/层归一化'
+      },
+      'dec-ffn': {
+        name: '前馈网络 FFN（解码器）', tag: '来自第 5 章',
+        text: '与编码器同款：每个位置独立 512 → 2048 → 512。此刻的向量已经融合了「已写出的英文」和「中文笔记」，FFN 负责把这些线索加工成「下一个词该是什么」的判断。',
+        io: '[2×512] → [2×2048] → [2×512]',
+        ch: 'ch05', chName: '第 5 章 · 前馈网络与残差/层归一化'
+      },
+      'dec-an3': {
+        name: 'Add & Norm（解码器·三）', tag: '来自第 5 章',
+        text: '第 1 个解码器层到此结束。同样三个子层再重复 5 次（共 6 层），每一层的交叉注意力都会重新翻一遍理解笔记。',
+        io: '[2×512] → [2×512]，然后进入下一层',
+        ch: 'ch05', chName: '第 5 章 · 前馈网络与残差/层归一化'
+      },
+      'dec-linear': {
+        name: '线性层（输出头）', tag: '本章',
+        text: '全图唯一改变维度的模块：把每个位置的 512 维向量投影到词表大小的 37000 维，每个词得一个分数（logit）。原论文让这个矩阵与解码器嵌入共享（转置复用），省掉 18.9M 参数。',
+        io: '[2×512] × [512×37000] → [2×37000]',
+        ch: 'ch06', chName: '第 6 章 · 参数量手算（本章）'
+      },
+      'dec-softmax': {
+        name: 'Softmax', tag: '来自第 3 章',
+        text: '只取最后一个位置（「I」之后）的那 37000 个分数，压成总和为 1 的概率分布。分数最高的词概率最大，但分布不是结果——还要经过解码策略选词。',
+        io: '[37000] logits → [37000] 概率（Σ=1）',
+        ch: 'ch03', chName: '第 3 章 · 注意力机制（softmax 复习）'
+      },
+      'dec-output': {
+        name: '输出：选词并追加', tag: '来自第 8 章',
+        text: '贪心解码直接取概率最大的词：love（0.71）。把它追加到解码器输入（「<s> I love」），整个解码器再跑一遍预测「you」，直到生成结束符 &lt;/s&gt;。束搜索、温度采样等更聪明的选法见第 8 章。',
+        io: '概率分布 → 1 个词；序列 [2] → [3]，循环往复',
+        ch: 'ch08', chName: '第 8 章 · 推理与解码策略'
+      }
+    };
+
+    /* ---------- 播放路径（数据流动顺序） ---------- */
+    var PATH = [
+      { id: 'src-input',  say: '① 输入中文「我 爱 你」→ 词表编号 [3]' },
+      { id: 'src-embed',  say: '② 词嵌入：每个词查表得到 512 维向量 → [3×512]' },
+      { id: 'src-pos',    say: '③ 加位置编码：注入「我排第几」的信息 → [3×512]' },
+      { id: 'enc-attn',   say: '④ 编码器第 1~6 层 · 多头自注意力：每个词看全句，无掩码' },
+      { id: 'enc-an1',    say: '⑤ Add & Norm：残差 + 层归一化，数值稳定' },
+      { id: 'enc-ffn',    say: '⑥ FFN：每个位置独立 512→2048→512 深度加工' },
+      { id: 'enc-an2',    say: '⑦ Add & Norm，本层结束 —— 同样流程重复 6 层' },
+      { id: 'enc-out',    say: '⑧ 理解笔记出炉 [3×512]，只算这一遍' },
+      { id: 'bridge',     say: '⑨ 笔记送进解码器每一层的交叉注意力（作为 K、V）' },
+      { id: 'tgt-input',  say: '⑩ 解码器侧：已生成「&lt;s&gt; I」，输入编号 [2]' },
+      { id: 'tgt-embed',  say: '⑪ 英文词嵌入 + 位置编码 → [2×512]' },
+      { id: 'dec-mask',   say: '⑫ 掩码自注意力：只能看自己和过去（上三角 −∞ → 0）' },
+      { id: 'dec-an1',    say: '⑬ Add & Norm' },
+      { id: 'dec-cross',  say: '⑭ 交叉注意力：Q 问「写到哪了」，K/V 答「原句在这」→ 分数矩阵 [2×3]' },
+      { id: 'dec-an2',    say: '⑮ Add & Norm' },
+      { id: 'dec-ffn',    say: '⑯ FFN：融合中英文线索，加工成「下一个词是什么」' },
+      { id: 'dec-an3',    say: '⑰ Add & Norm，本层结束 —— 同样流程重复 6 层' },
+      { id: 'dec-linear', say: '⑱ 线性层：[2×512] → [2×37000]，每个词一个分数' },
+      { id: 'dec-softmax',say: '⑲ softmax（取最后一行）：37000 个分数 → 概率分布' },
+      { id: 'dec-output', say: '⑳ 概率最大者胜出：love（0.71）！追加回输入，再跑一遍 → you → &lt;/s&gt;，翻译完成' }
+    ];
+
+    /* ---------- DOM ---------- */
+    var root = document.querySelector('.dz-arch');
+    if (!root) return;
+    var detail = root.querySelector('#dz-arch-detail');
+    var status = root.querySelector('#dz-arch-status');
+    var btnPlay = root.querySelector('#dz-arch-play');
+    var btnStep = root.querySelector('#dz-arch-step');
+    var btnReset = root.querySelector('#dz-arch-reset');
+    var mods = Array.prototype.slice.call(root.querySelectorAll('[data-mod]'));
+    var timers = [];
+    var playing = false;
+    var stepIdx = 0;
+
+    function modEl(id) { return root.querySelector('[data-mod="' + id + '"]'); }
+
+    function clearTimers() {
+      for (var i = 0; i < timers.length; i++) clearTimeout(timers[i]);
+      timers = [];
+    }
+
+    function clearFlow() {
+      mods.forEach(function (m) { m.classList.remove('on', 'done'); });
+    }
+
+    function showDetail(id) {
+      var d = INFO[id];
+      if (!d) return;
+      mods.forEach(function (m) { m.classList.toggle('sel', m.getAttribute('data-mod') === id); });
+      detail.innerHTML =
+        '<h4>' + d.name + '</h4>' +
+        '<span class="d-tag">' + d.tag + '</span>' +
+        '<p>' + d.text + '</p>' +
+        '<div class="d-io">' + d.io + '</div>' +
+        '<p class="d-link">完整推导见 <a href="#' + d.ch + '">' + d.chName + '</a></p>';
+    }
+
+    function reset() {
+      clearTimers();
+      playing = false;
+      stepIdx = 0;
+      clearFlow();
+      mods.forEach(function (m) { m.classList.remove('sel'); });
+      btnPlay.disabled = false;
+      btnStep.disabled = false;
+      btnPlay.textContent = '▶ 播放数据流';
+      status.innerHTML = '点击图中任意模块查看详情，或点「播放数据流」看「我爱你 → I love you」的完整旅程。';
+    }
+
+    function lightUp(idx, markDone) {
+      var step = PATH[idx];
+      var el = modEl(step.id);
+      if (!el) return;
+      mods.forEach(function (m) { m.classList.remove('on'); });
+      el.classList.add('on');
+      el.classList.remove('done');
+      if (markDone) {
+        for (var i = 0; i < idx; i++) {
+          var prev = modEl(PATH[i].id);
+          if (prev) prev.classList.add('done');
+        }
+      }
+      status.innerHTML = '<b>数据流 ' + (idx + 1) + '/' + PATH.length + '</b>　' + step.say;
+      if (el.scrollIntoView) {
+        try { el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }); } catch (e) {}
+      }
+    }
+
+    function play() {
+      reset();
+      playing = true;
+      btnPlay.disabled = true;
+      btnStep.disabled = true;
+      btnPlay.textContent = '▶ 播放中…';
+      for (var i = 0; i < PATH.length; i++) {
+        (function (k) {
+          timers.push(setTimeout(function () { lightUp(k, true); }, 550 * k));
+        })(i);
+      }
+      timers.push(setTimeout(function () {
+        playing = false;
+        btnPlay.disabled = false;
+        btnStep.disabled = false;
+        btnPlay.textContent = '▶ 再播一次';
+        status.innerHTML = '<b>完成！</b>「love」已生成。绿色描边 = 数据流经过的模块。点任意模块复习细节，或「重置」。';
+      }, 550 * PATH.length + 200));
+    }
+
+    function step() {
+      clearTimers();
+      playing = false;
+      btnPlay.disabled = false;
+      btnPlay.textContent = '▶ 播放数据流';
+      if (stepIdx >= PATH.length) { reset(); return; }
+      lightUp(stepIdx, true);
+      stepIdx++;
+      if (stepIdx >= PATH.length) {
+        btnStep.disabled = false;
+      }
+    }
+
+    /* ---------- 事件绑定 ---------- */
+    mods.forEach(function (m) {
+      var id = m.getAttribute('data-mod');
+      m.addEventListener('click', function () {
+        clearTimers();
+        playing = false;
+        btnPlay.disabled = false;
+        btnStep.disabled = false;
+        btnPlay.textContent = '▶ 播放数据流';
+        clearFlow();
+        showDetail(id);
+        status.innerHTML = '正在查看模块：<b>' + (INFO[id] ? INFO[id].name : id) + '</b>';
+      });
+      m.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          m.click();
+        }
+      });
+    });
+
+    btnPlay.addEventListener('click', play);
+    btnStep.addEventListener('click', step);
+    btnReset.addEventListener('click', reset);
+
+    /* 默认展示「交叉注意力」详情——本章最核心的新零件 */
+    showDetail('dec-cross');
+  } catch (err) {
+    var r = document.querySelector('.dz-arch');
+    if (r) {
+      r.innerHTML = '<p class="dz-arch-err">演示初始化失败：' + String(err && err.message ? err.message : err) + '</p>';
+    }
+  }
+})();
+</script>

@@ -1,0 +1,339 @@
+<div class="dz-attn">
+<style>
+.dz-attn{font:inherit;color:var(--ink);width:100%}
+.dz-attn *{box-sizing:border-box}
+.dz-attn .dz-note{font-size:.86rem;color:var(--muted);margin:0 0 10px;line-height:1.7}
+.dz-attn .dz-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.dz-attn .dz-btn{appearance:none;border:1px solid var(--line);background:var(--paper2);color:var(--ink);border-radius:10px;padding:10px 16px;font:600 .86rem/1 inherit;cursor:pointer;min-height:42px;min-width:56px}
+.dz-attn .dz-btn:hover{border-color:var(--accent);color:var(--accent)}
+.dz-attn .dz-btn:disabled{opacity:.4;cursor:default}
+.dz-attn .dz-btn.is-on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink)}
+.dz-attn .dz-btn.dz-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.dz-attn .dz-lbl{font:600 .76rem/1.2 inherit;color:var(--muted);letter-spacing:.08em}
+.dz-attn .dz-tokens{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 14px}
+.dz-attn .dz-tok{display:flex;flex-direction:column;align-items:center;gap:6px}
+.dz-attn .dz-tok-word{min-width:58px;min-height:46px;display:flex;align-items:center;justify-content:center;border:1.5px solid var(--line);border-radius:10px;background:var(--paper2);font:700 1rem/1 inherit;padding:6px 10px;transition:border-color .2s,background .2s}
+.dz-attn .dz-tok-word.is-query{border-color:var(--accent);background:var(--accent-soft)}
+.dz-attn .dz-tok-word.is-key{border-color:var(--accent2);background:var(--accent2-soft)}
+.dz-attn .dz-swaps{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;max-width:150px}
+.dz-attn .dz-chip{appearance:none;border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:999px;padding:6px 11px;font:500 .78rem/1 inherit;cursor:pointer;min-height:34px}
+.dz-attn .dz-chip:hover{border-color:var(--accent);color:var(--accent)}
+.dz-attn .dz-chip.is-cur{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+.dz-attn .dz-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:860px){.dz-attn .dz-grid{grid-template-columns:1fr}}
+.dz-attn .dz-panel{border:1px solid var(--line);border-radius:12px;background:var(--paper2);padding:12px}
+.dz-attn .dz-panel h5{margin:0 0 8px;font:700 .9rem/1.4 inherit;color:var(--ink)}
+.dz-attn .dz-panel h5 small{font-weight:500;color:var(--muted);font-size:.78rem;margin-left:6px}
+.dz-attn table.dz-heat{border-collapse:separate;border-spacing:3px;margin:0 auto}
+.dz-attn .dz-heat th{font:600 .82rem/1.4 inherit;color:var(--ink);text-align:center;padding:2px 4px;white-space:nowrap}
+.dz-attn .dz-heat th.dz-rowhead{padding-right:8px}
+.dz-attn .dz-heat td{width:54px;height:46px;text-align:center;font:600 .78rem/1 monospace;border-radius:8px;color:var(--ink);transition:transform .15s}
+.dz-attn tr.dz-qrow{cursor:pointer}
+.dz-attn tr.dz-qrow:hover td{transform:scale(1.04)}
+.dz-attn tr.dz-qrow.is-sel th{color:var(--accent)}
+.dz-attn tr.dz-qrow.is-sel td{outline:2px solid var(--accent);outline-offset:-2px}
+.dz-attn .dz-hint{font-size:.78rem;color:var(--muted);margin-top:8px;line-height:1.6}
+.dz-attn .dz-step-line{display:none;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 10px;border:1px dashed var(--line);border-radius:10px;margin-bottom:8px;font:500 .88rem/1.5 inherit}
+.dz-attn .dz-step-line.is-live{display:flex;border-style:solid;border-color:var(--accent2);background:var(--accent2-soft)}
+.dz-attn .dz-step-line .dz-idx{font:700 .72rem/1 monospace;color:var(--muted);min-width:22px}
+.dz-attn .dz-key-pill{display:inline-block;padding:3px 10px;border-radius:999px;border:1.5px solid var(--line);background:var(--paper2);font-weight:700}
+.dz-attn .dz-step-line.is-live .dz-key-pill{border-color:var(--accent2)}
+.dz-attn .dz-mono{font:600 .82rem/1.5 monospace;color:var(--ink)}
+.dz-attn .dz-mono small{color:var(--muted);font-weight:400}
+.dz-attn .dz-bar{flex:1;min-width:70px;height:14px;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--paper2)}
+.dz-attn .dz-bar i{display:block;height:100%;width:0%;background:var(--accent2);transition:width .5s ease}
+.dz-attn .dz-out{opacity:0;transition:opacity .5s;border-color:var(--accent3);background:var(--accent3-soft)}
+.dz-attn .dz-out.is-done{opacity:1;border-style:solid}
+.dz-attn .dz-out b{color:var(--accent3)}
+.dz-attn .dz-legend{display:flex;align-items:center;gap:8px;font-size:.74rem;color:var(--muted);margin-top:8px}
+.dz-attn .dz-legend .dz-lg{width:70px;height:10px;border-radius:5px;border:1px solid var(--line)}
+.dz-attn .dz-err{border:1px solid var(--accent2);background:var(--accent2-soft);color:var(--accent2);border-radius:10px;padding:12px;font:500 .85rem/1.6 monospace;white-space:pre-wrap}
+.dz-attn .dz-stage-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.dz-attn .dz-stage-cap{font:600 .82rem/1.4 inherit;color:var(--muted)}
+.dz-attn .dz-stage-cap b{color:var(--accent)}
+</style>
+
+<div class="dz-note">每个词预置了一个 6 维向量。下方热力图就是公式 softmax(QKᵀ/√d_k)·V 里的权重矩阵 A，实时计算。<b>点击热力图的某一行（或点击上方某个词）</b>，右侧面板会逐帧播放这个词"提问 → 逐个比对 → softmax → 加权求和"的全过程——正是正文 3.5 节手算步骤的动画版。</div>
+
+<div class="dz-toolbar">
+  <span class="dz-lbl">例句</span>
+  <button type="button" class="dz-btn dz-preset is-on" data-i="0">我非常爱这只猫</button>
+  <button type="button" class="dz-btn dz-preset" data-i="1">小猫在院子里追蝴蝶</button>
+  <button type="button" class="dz-btn dz-preset" data-i="2">老师说数学其实很有趣</button>
+</div>
+
+<div class="dz-tokens" id="dz-attn-tokens"></div>
+<div class="dz-note" style="margin-top:-6px">每个词下面的小胶囊是候选词，点一下即可换词重算。</div>
+
+<div class="dz-grid">
+  <div class="dz-panel">
+    <h5>注意力权重热力图<small>行 = 谁提问（Query） · 列 = 看谁（Key） · 每行和为 1</small></h5>
+    <div style="overflow-x:auto">
+      <table class="dz-heat" id="dz-attn-heat" aria-label="注意力权重矩阵热力图"></table>
+    </div>
+    <div class="dz-legend">
+      <span>低</span><span class="dz-lg" id="dz-attn-lg"></span><span>高</span>
+      <span style="margin-left:auto">缩放因子 √d_k = √6 ≈ 2.449</span>
+    </div>
+    <p class="dz-hint">试着点击某一行：观察这个词把注意力分给了谁。也可以换词，看热力图如何跟着变化。</p>
+  </div>
+
+  <div class="dz-panel">
+    <div class="dz-stage-head">
+      <h5 style="margin:0">逐词查询动画<small id="dz-attn-cap"></small></h5>
+    </div>
+    <div class="dz-toolbar" style="margin-bottom:12px">
+      <button type="button" class="dz-btn" id="dz-attn-prev">‹ 上一步</button>
+      <button type="button" class="dz-btn dz-primary" id="dz-attn-next">下一步 ›</button>
+      <button type="button" class="dz-btn" id="dz-attn-play">▶ 自动播放</button>
+      <button type="button" class="dz-btn" id="dz-attn-reset">↺ 重置</button>
+    </div>
+    <div id="dz-attn-stage"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  try{
+    /* ============ 数据：6 维词向量 ============ */
+    var DIM = 6, SCALE = Math.sqrt(DIM);
+    var VEC = {
+      '我':[1.2,0.3,-0.2,0.8,0.1,0.5],'老师':[0.9,0.6,-0.1,0.7,0.4,0.2],
+      '非常':[0.2,1.3,0.5,-0.1,0.7,0.3],'其实':[0.3,1.0,0.8,0.2,0.5,0.1],
+      '爱':[0.4,0.5,1.4,0.6,0.9,0.2],'追':[0.3,0.4,1.1,0.5,1.2,0.6],
+      '这只':[0.1,0.2,0.3,1.3,0.2,0.9],'在':[0.2,0.1,0.4,1.1,0.3,0.7],
+      '猫':[0.7,0.2,0.9,0.3,1.1,1.0],'小猫':[0.6,0.3,0.8,0.4,1.2,0.9],
+      '蝴蝶':[0.5,0.7,0.4,0.2,1.3,0.8],'数学':[0.3,0.2,0.6,0.5,0.4,1.4],
+      '院子里':[0.2,0.4,0.3,0.9,0.6,1.2],'说':[0.5,0.8,0.7,0.9,0.3,0.4],
+      '很':[0.2,1.1,0.6,0.0,0.6,0.4],'有趣':[0.6,0.9,1.0,0.4,0.8,0.6]
+    };
+    var PRESETS = [
+      {words:['我','非常','爱','这只','猫'], swaps:[['我','老师'],['非常','很'],['爱','追'],['这只','在'],['猫','蝴蝶']]},
+      {words:['小猫','在','院子里','追','蝴蝶'], swaps:[['小猫','猫'],['在','说'],['院子里','数学'],['追','爱'],['蝴蝶','猫']]},
+      {words:['老师','说','数学','其实','很','有趣'], swaps:[['老师','我'],['说','在'],['数学','猫'],['其实','非常'],['很','非常'],['有趣','蝴蝶']]}
+    ];
+
+    /* ============ DOM ============ */
+    function $(id){ return document.getElementById(id); }
+    var tokensEl=$('dz-attn-tokens'), heatEl=$('dz-attn-heat'), stageEl=$('dz-attn-stage'),
+        capEl=$('dz-attn-cap'), lgEl=$('dz-attn-lg');
+    if(!tokensEl||!heatEl||!stageEl) return;
+
+    function cssVar(name){
+      var v=getComputedStyle(document.querySelector('.dz-attn')).getPropertyValue(name);
+      return (v||'').trim();
+    }
+    function hexToRgb(h){
+      h=h.replace('#','');
+      if(h.length===3) h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+      return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];
+    }
+    function heatColor(t){
+      var lo=hexToRgb(cssVar('--heat-lo')||'#F5F1E8'), hi=hexToRgb(cssVar('--heat-hi')||'#2B4BD8');
+      var c=lo.map(function(v,i){ return Math.round(v+(hi[i]-v)*t); });
+      return 'rgb('+c[0]+','+c[1]+','+c[2]+')';
+    }
+    lgEl.style.background='linear-gradient(90deg,'+(cssVar('--heat-lo')||'#F5F1E8')+','+(cssVar('--heat-hi')||'#2B4BD8')+')';
+
+    /* ============ 数学 ============ */
+    function dot(a,b){ var s=0; for(var i=0;i<a.length;i++) s+=a[i]*b[i]; return s; }
+    function softmax(row){
+      var m=Math.max.apply(null,row), e=row.map(function(x){return Math.exp(x-m);}),
+          t=e.reduce(function(a,b){return a+b;},0);
+      return e.map(function(x){return x/t;});
+    }
+    function compute(words){
+      var Q=words.map(function(w){return VEC[w];});
+      var raw=Q.map(function(q){ return Q.map(function(k){ return dot(q,k); }); });
+      var scaled=raw.map(function(r){ return r.map(function(x){ return x/SCALE; }); });
+      var W=scaled.map(softmax);
+      var O=Q.map(function(q,i){
+        var o=[]; for(var d=0;d<DIM;d++){
+          var s=0; for(var j=0;j<words.length;j++) s+=W[i][j]*Q[j][d];
+          o.push(s);
+        } return o;
+      });
+      return {raw:raw, scaled:scaled, W:W, O:O};
+    }
+    function fmt(x,n){ return x.toFixed(n===undefined?2:n); }
+    function vecStr(v){ return '('+v.map(function(x){return fmt(x);}).join(', ')+')'; }
+
+    /* ============ 状态 ============ */
+    var state={preset:0, words:PRESETS[0].words.slice(), queryRow:0, step:0, playing:false, timer:null};
+    var cur=null;
+
+    function totalSteps(){ return 1 + state.words.length + 1; } // 开场 + 每词比对 + 求和
+
+    /* ============ 渲染：词语条 ============ */
+    function renderTokens(){
+      tokensEl.innerHTML='';
+      state.words.forEach(function(w,pos){
+        var box=document.createElement('div'); box.className='dz-tok';
+        var wd=document.createElement('button'); wd.type='button';
+        wd.className='dz-tok-word'+(pos===state.queryRow?' is-query':'');
+        wd.textContent=w;
+        wd.setAttribute('aria-label','选择「'+w+'」作为查询词');
+        wd.addEventListener('click',function(){ selectQuery(pos); });
+        box.appendChild(wd);
+        var sw=document.createElement('div'); sw.className='dz-swaps';
+        PRESETS[state.preset].swaps[pos].forEach(function(cand){
+          var c=document.createElement('button'); c.type='button';
+          c.className='dz-chip'+(cand===w?' is-cur':'');
+          c.textContent=cand;
+          c.addEventListener('click',function(){
+            stopPlay(); state.words[pos]=cand; state.step=0; recompute();
+          });
+          sw.appendChild(c);
+        });
+        box.appendChild(sw);
+        tokensEl.appendChild(box);
+      });
+    }
+
+    /* ============ 渲染：热力图 ============ */
+    function renderHeat(){
+      heatEl.innerHTML='';
+      var n=state.words.length;
+      var tr=document.createElement('tr');
+      tr.appendChild(document.createElement('th'));
+      state.words.forEach(function(w){
+        var th=document.createElement('th'); th.textContent=w; tr.appendChild(th);
+      });
+      heatEl.appendChild(tr);
+      for(var i=0;i<n;i++){
+        (function(i){
+          var row=document.createElement('tr');
+          row.className='dz-qrow'+(i===state.queryRow?' is-sel':'');
+          var th=document.createElement('th'); th.className='dz-rowhead'; th.textContent=state.words[i];
+          row.appendChild(th);
+          for(var j=0;j<n;j++){
+            var td=document.createElement('td');
+            td.textContent=fmt(cur.W[i][j]);
+            td.style.background=heatColor(Math.min(1,cur.W[i][j]));
+            row.appendChild(td);
+          }
+          row.addEventListener('click',function(){ selectQuery(i); });
+          heatEl.appendChild(row);
+        })(i);
+      }
+    }
+
+    /* ============ 渲染：动画舞台 ============ */
+    function renderStage(){
+      var i=state.queryRow, words=state.words, n=words.length;
+      capEl.innerHTML=' 当前查询词：<b>「'+words[i]+'」</b>（第 '+(state.step)+' / '+(totalSteps()-1)+' 步）';
+      stageEl.innerHTML='';
+      if(state.step===0){
+        var d=document.createElement('div');
+        d.className='dz-step-line is-live'; d.style.borderColor='var(--accent)'; d.style.background='var(--accent-soft)';
+        d.innerHTML='<span class="dz-key-pill">'+words[i]+'</span>'+
+          '<span>拿着自己的 Query 向量 <span class="dz-mono">'+vecStr(VEC[words[i]])+'</span> 开始提问。它要和每个词的 Key 做一次点积。点「下一步 ›」或「▶ 自动播放」开始。</span>';
+        stageEl.appendChild(d);
+        markKey(-1);
+        return;
+      }
+      var compared=Math.min(state.step-1,n);       // 已完成比对的词数
+      var doneAll=compared===n;
+      // 用缩放后的分数直接取指数（演示里不减最大值，数值小不会溢出）；最终权重显示真实 softmax 值
+      for(var j=0;j<compared;j++){
+        (function(j){
+          var live=(j===compared-1&&!doneAll);
+          var line=document.createElement('div');
+          line.className='dz-step-line'+(live?' is-live':'');
+          var w=cur.W[i][j];
+          line.innerHTML='<span class="dz-idx">'+(j+1)+'</span>'+
+            '<span class="dz-key-pill">'+words[j]+'</span>'+
+            '<span class="dz-mono">'+vecStr(VEC[words[i]])+' · '+vecStr(VEC[words[j]])+' = '+fmt(cur.raw[i][j])+
+            ' <small>÷√6</small> = '+fmt(cur.scaled[i][j])+'</span>'+
+            '<span class="dz-bar"><i style="width:'+Math.round(w*100)+'%"></i></span>'+
+            '<span class="dz-mono">权重 '+fmt(w)+'</span>';
+          stageEl.appendChild(line);
+        })(j);
+      }
+      markKey(doneAll?-1:compared);
+      if(doneAll){
+        var o=document.createElement('div');
+        o.className='dz-step-line dz-out'+(state.step>=totalSteps()-1?' is-done':'');
+        var terms=words.map(function(w,j){ return fmt(cur.W[i][j])+'×V('+w+')'; }).join(' + ');
+        o.innerHTML='<span class="dz-key-pill">输出</span>'+
+          '<span>'+terms+'</span>'+
+          '<span class="dz-mono">= <b>'+vecStr(cur.O[i])+'</b></span>'+
+          '<span>「'+words[i]+'」的新表示 = 全句内容的加权混合，共 '+n+' 份，权重和为 1。</span>';
+        stageEl.appendChild(o);
+      }
+    }
+
+    function markKey(idx){
+      var words=tokensEl.querySelectorAll('.dz-tok-word');
+      for(var i=0;i<words.length;i++) words[i].classList.remove('is-key');
+      if(idx>=0&&idx<words.length) words[idx].classList.add('is-key');
+    }
+
+    /* ============ 控制 ============ */
+    function recompute(){
+      cur=compute(state.words);
+      if(state.queryRow>=state.words.length) state.queryRow=state.words.length-1;
+      renderTokens(); renderHeat(); renderStage();
+    }
+    function selectQuery(i){
+      stopPlay(); state.queryRow=i; state.step=0;
+      renderTokens(); renderHeat(); renderStage();
+    }
+    function stepNext(){
+      if(state.step<totalSteps()-1){ state.step++; renderStage(); }
+      else stopPlay();
+    }
+    function stepPrev(){
+      stopPlay();
+      if(state.step>0){ state.step--; renderStage(); }
+    }
+    function stopPlay(){
+      state.playing=false;
+      if(state.timer){ clearInterval(state.timer); state.timer=null; }
+      $('dz-attn-play').textContent='▶ 自动播放';
+      $('dz-attn-play').classList.remove('is-on');
+    }
+    function togglePlay(){
+      if(state.playing){ stopPlay(); return; }
+      if(state.step>=totalSteps()-1) state.step=0;
+      state.playing=true;
+      $('dz-attn-play').textContent='⏸ 暂停';
+      $('dz-attn-play').classList.add('is-on');
+      renderStage();
+      state.timer=setInterval(function(){
+        if(state.step>=totalSteps()-1){ stopPlay(); return; }
+        state.step++; renderStage();
+      },1400);
+    }
+
+    $('dz-attn-next').addEventListener('click',function(){ stopPlay(); stepNext(); });
+    $('dz-attn-prev').addEventListener('click',stepPrev);
+    $('dz-attn-play').addEventListener('click',togglePlay);
+    $('dz-attn-reset').addEventListener('click',function(){ stopPlay(); state.step=0; renderStage(); });
+
+    var presetBtns=document.querySelectorAll('.dz-attn .dz-preset');
+    presetBtns.forEach(function(btn){
+      btn.addEventListener('click',function(){
+        stopPlay();
+        presetBtns.forEach(function(b){ b.classList.remove('is-on'); });
+        btn.classList.add('is-on');
+        state.preset=parseInt(btn.getAttribute('data-i'),10);
+        state.words=PRESETS[state.preset].words.slice();
+        state.queryRow=0; state.step=0;
+        recompute();
+      });
+    });
+
+    recompute();
+  }catch(err){
+    var host=document.querySelector('.dz-attn');
+    if(host){
+      var e=document.createElement('div');
+      e.className='dz-err';
+      e.textContent='演示初始化失败：'+(err&&err.message?err.message:err);
+      host.appendChild(e);
+    }
+  }
+})();
+</script>
+</div>

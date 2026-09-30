@@ -1,0 +1,257 @@
+<div class="dz-mh">
+<style>
+.dz-mh{font:inherit;color:var(--ink);width:100%}
+.dz-mh *{box-sizing:border-box}
+.dz-mh .dz-note{font-size:.86rem;color:var(--muted);margin:0 0 10px;line-height:1.7}
+.dz-mh .dz-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.dz-mh .dz-btn{appearance:none;border:1px solid var(--line);background:var(--paper2);color:var(--ink);border-radius:10px;padding:10px 16px;font:600 .86rem/1 inherit;cursor:pointer;min-height:42px;min-width:56px}
+.dz-mh .dz-btn:hover{border-color:var(--accent);color:var(--accent)}
+.dz-mh .dz-btn.is-on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink)}
+.dz-mh .dz-btn.dz-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.dz-mh .dz-lbl{font:600 .76rem/1.2 inherit;color:var(--muted);letter-spacing:.08em}
+.dz-mh .dz-wall{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+@media (max-width:860px){.dz-mh .dz-wall{grid-template-columns:repeat(2,1fr)}}
+.dz-mh .dz-head-card{border:1px solid var(--line);border-radius:12px;background:var(--paper2);padding:10px;cursor:pointer;transition:border-color .2s,transform .15s;text-align:center}
+.dz-mh .dz-head-card:hover{border-color:var(--accent);transform:translateY(-2px)}
+.dz-mh .dz-head-card.is-sel{border-color:var(--accent);outline:2px solid var(--accent);outline-offset:-2px}
+.dz-mh .dz-head-card.is-tour{border-color:var(--accent2);outline:2px solid var(--accent2);outline-offset:-2px}
+.dz-mh .dz-head-name{font:700 .84rem/1.3 inherit;color:var(--ink);margin-bottom:2px}
+.dz-mh .dz-head-role{font:500 .72rem/1.4 inherit;color:var(--muted);margin-bottom:8px;min-height:2.6em;display:flex;align-items:center;justify-content:center}
+.dz-mh table.dz-mini{border-collapse:separate;border-spacing:2px;margin:0 auto}
+.dz-mh .dz-mini td{width:22px;height:22px;border-radius:4px}
+@media (max-width:480px){.dz-mh .dz-mini td{width:18px;height:18px}}
+.dz-mh .dz-detail{border:1px solid var(--line);border-radius:12px;background:var(--paper2);padding:14px}
+.dz-mh .dz-detail-grid{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:start}
+@media (max-width:720px){.dz-mh .dz-detail-grid{grid-template-columns:1fr}}
+.dz-mh table.dz-big{border-collapse:separate;border-spacing:3px;margin:0 auto}
+.dz-mh .dz-big th{font:600 .78rem/1.3 inherit;color:var(--ink);text-align:center;padding:2px 4px;white-space:nowrap}
+.dz-mh .dz-big td{width:48px;height:42px;text-align:center;font:600 .74rem/1 monospace;border-radius:8px;color:var(--ink)}
+@media (max-width:480px){.dz-mh .dz-big td{width:38px;height:36px;font-size:.68rem}}
+.dz-mh .dz-big-read{font:500 .9rem/1.8 inherit;color:var(--ink)}
+.dz-mh .dz-big-read b{color:var(--accent)}
+.dz-mh .dz-big-read .dz-role-tag{display:inline-block;border:1px solid var(--accent);color:var(--accent);border-radius:999px;padding:2px 10px;font:700 .74rem/1.4 inherit;margin-bottom:8px}
+.dz-mh .dz-legend{display:flex;align-items:center;gap:8px;font-size:.74rem;color:var(--muted);margin-top:10px}
+.dz-mh .dz-legend .dz-lg{width:70px;height:10px;border-radius:5px;border:1px solid var(--line)}
+.dz-mh .dz-err{border:1px solid var(--accent2);background:var(--accent2-soft);color:var(--accent2);border-radius:10px;padding:12px;font:500 .85rem/1.6 monospace;white-space:pre-wrap}
+</style>
+
+<div class="dz-note">同一句输入被送进 8 个注意力头（数值预计算，每行和为 1），每个头只按自己学到的"相关标准"分配注意力。下方 8 张小热力图并排陈列——<b>点击任意一张</b>放大并阅读它的解读；「逐头轮播」会按顺序自动巡视 8 位"评审"。行 = 谁提问，列 = 看谁。</div>
+
+<div class="dz-toolbar">
+  <span class="dz-lbl">例句</span>
+  <button type="button" class="dz-btn dz-sent is-on" data-i="0">动物们 跨过 河流 因为 口渴</button>
+  <button type="button" class="dz-btn dz-sent" data-i="1">小明 把 书 递给 小红</button>
+</div>
+
+<div class="dz-wall" id="dz-mh-wall"></div>
+
+<div class="dz-toolbar">
+  <button type="button" class="dz-btn dz-primary" id="dz-mh-tour">▶ 逐头轮播</button>
+  <button type="button" class="dz-btn" id="dz-mh-reset">↺ 重置</button>
+</div>
+
+<div class="dz-detail">
+  <div class="dz-detail-grid">
+    <div style="overflow-x:auto">
+      <table class="dz-big" id="dz-mh-big" aria-label="选中的头的注意力热力图"></table>
+      <div class="dz-legend">
+        <span>低</span><span class="dz-lg" id="dz-mh-lg"></span><span>高</span>
+        <span style="margin-left:auto" id="dz-mh-sums">每行权重和 = 1</span>
+      </div>
+    </div>
+    <div class="dz-big-read" id="dz-mh-read"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  try{
+    /* ============ 数据：8 个头 × 2 组例句（预计算，行和=1） ============ */
+    var SENTS=[
+      {words:['动物们','跨过','河流','因为','口渴'],
+       heads:[
+        {name:'头 1',role:'盯前一个词',
+         M:[[1,0,0,0,0],[0.85,0.15,0,0,0],[0,0.85,0.15,0,0],[0,0,0.85,0.15,0],[0,0,0,0.85,0.15]],
+         read:'每行的亮格都落在<b>左边紧邻的一列</b>：「跨过」主要看「动物们」，「河流」主要看「跨过」。这是一个位置型的头——它在学"相邻词往往构成短语"这条中文语感。第 1 行没有左边，只能看自己。'},
+        {name:'头 2',role:'锁定主语',
+         M:[[1,0,0,0,0],[0.88,0.03,0.03,0.03,0.03],[0.88,0.03,0.03,0.03,0.03],[0.88,0.03,0.03,0.03,0.03],[0.88,0.03,0.03,0.03,0.03]],
+         read:'几乎所有词都把大块权重交给「动物们」——这一句的<b>主语</b>。无论谁在提问，先搞清楚"动作是谁发出的"总没错。这是句法型头的典型长相：一列竖直亮线，亮在主语列。'},
+        {name:'头 3',role:'全局平均',
+         M:[[0.2,0.2,0.2,0.2,0.2],[0.2,0.2,0.2,0.2,0.2],[0.2,0.2,0.2,0.2,0.2],[0.2,0.2,0.2,0.2,0.2],[0.2,0.2,0.2,0.2,0.2]],
+         read:'每个词都把注意力平均分给全句 5 个词（各 0.2）。它不做精细选择，相当于对全句做一次<b>模糊的全局摘要</b>——让每个词的新表示里都掺一点"整句话的味道"。'},
+        {name:'头 4',role:'锁定动词',
+         M:[[0.03,0.88,0.03,0.03,0.03],[0,1,0,0,0],[0.03,0.88,0.03,0.03,0.03],[0.03,0.88,0.03,0.03,0.03],[0.03,0.88,0.03,0.03,0.03]],
+         read:'竖直亮线落在「跨过」——句子的<b>动词</b>。换一句例句再看，它锁定的仍是动词位而不是某个具体的词：头学到的是"角色"，不是"词"。'},
+        {name:'头 5',role:'自关注',
+         M:[[0.92,0.02,0.02,0.02,0.02],[0.02,0.92,0.02,0.02,0.02],[0.02,0.02,0.92,0.02,0.02],[0.02,0.02,0.02,0.92,0.02],[0.02,0.02,0.02,0.02,0.92]],
+         read:'亮格全在<b>主对角线</b>上：每个词主要看自己（0.92），只留一点点给邻居。这个头负责把词自身的特征稳稳保留下来，等别的头把上下文送来后再汇合。'},
+        {name:'头 6',role:'看后一个词',
+         M:[[0.15,0.85,0,0,0],[0,0.15,0.85,0,0],[0,0,0.15,0.85,0],[0,0,0,0.15,0.85],[0,0,0,0,1]],
+         read:'和头 1 恰好<b>镜像</b>：亮格落在右边紧邻的一列。「动物们」向前看「跨过」，预判接下来要发生什么。位置关系也分方向——这正是"一个头不够"的直观证据。'},
+        {name:'头 7',role:'因果连接',
+         M:[[0.2,0.2,0.2,0.2,0.2],[0.2,0.2,0.2,0.2,0.2],[0.2,0.2,0.2,0.2,0.2],[0,0,0,1,0],[0.03,0.03,0.03,0.88,0.03]],
+         read:'「口渴」那一行的尖峰落在「因为」（0.88）：这个头专门捕捉<b>因果/逻辑连接词</b>——"为什么跨过河流？因为口渴"。远距离的逻辑呼应就靠这类头。'},
+        {name:'头 8',role:'局部窗口',
+         M:[[0.43,0.22,0.15,0.11,0.09],[0.19,0.39,0.19,0.13,0.1],[0.12,0.19,0.38,0.19,0.12],[0.1,0.13,0.19,0.39,0.19],[0.09,0.11,0.15,0.22,0.43]],
+         read:'权重以主对角线为峰、向两侧<b>逐渐衰减</b>：越近的词看得越重。它不像头 1/6 那样只认一格，而是看一个"近邻窗口"，兼顾自身与左右语境。'}
+       ]},
+      {words:['小明','把','书','递给','小红'],
+       heads:[
+        {name:'头 1',role:'盯前一个词',
+         M:[[1,0,0,0,0],[0.85,0.15,0,0,0],[0,0.85,0.15,0,0],[0,0,0.85,0.15,0],[0,0,0,0.85,0.15]],
+         read:'还是那条次对角线：「把」看「小明」、「书」看「把」。头的"性格"不随句子改变——它管的是位置关系，不是具体内容。'},
+        {name:'头 2',role:'锁定主语',
+         M:[[1,0,0,0,0],[0.88,0.03,0.03,0.03,0.03],[0.88,0.03,0.03,0.03,0.03],[0.88,0.03,0.03,0.03,0.03],[0.88,0.03,0.03,0.03,0.03]],
+         read:'竖直亮线这次落在「小明」——新句子的主语换了人，头 2 立刻跟上。对比上一句的「动物们」：锁定的是<b>主语这个角色</b>。'},
+        {name:'头 3',role:'全局平均',
+         M:[[0.2,0.2,0.2,0.2,0.2],[0.2,0.2,0.2,0.2,0.2],[0.2,0.2,0.2,0.2,0.2],[0.2,0.2,0.2,0.2,0.2],[0.2,0.2,0.2,0.2,0.2]],
+         read:'依然是均匀的 0.2——全局摘要头在任何句子里都长一个样。'},
+        {name:'头 4',role:'锁定动词',
+         M:[[0.03,0.03,0.03,0.88,0.03],[0.03,0.03,0.03,0.88,0.03],[0.03,0.03,0.03,0.88,0.03],[0,0,0,1,0],[0.03,0.03,0.03,0.88,0.03]],
+         read:'这一句的动词是「递给」，竖直亮线跟着移到了第 4 列。再确认一次：头学到的是"动词位"这个角色。'},
+        {name:'头 5',role:'自关注',
+         M:[[0.92,0.02,0.02,0.02,0.02],[0.02,0.92,0.02,0.02,0.02],[0.02,0.02,0.92,0.02,0.02],[0.02,0.02,0.02,0.92,0.02],[0.02,0.02,0.02,0.02,0.92]],
+         read:'主对角线依旧明亮。自关注头负责"先保住自己"，与句子内容无关。'},
+        {name:'头 6',role:'看后一个词',
+         M:[[0.15,0.85,0,0,0],[0,0.15,0.85,0,0],[0,0,0.15,0.85,0],[0,0,0,0.15,0.85],[0,0,0,0,1]],
+         read:'亮格仍在右边紧邻一列。「书」向前看「递给」——名词预判动作。与头 1 互为镜像。'},
+        {name:'头 7',role:'宾语呼应',
+         M:[[0.2,0.2,0.2,0.2,0.2],[0.2,0.2,0.2,0.2,0.2],[0.04,0.04,0.04,0.84,0.04],[0.06,0.06,0.76,0.06,0.06],[0.04,0.04,0.04,0.84,0.04]],
+         read:'这句没有因果词，头 7 转而捕捉<b>动宾关系</b>：「递给」那行的尖峰落在「书」（0.76），「书」「小红」也回看向动词。真实的头就是这样"身兼数职"的。'},
+        {name:'头 8',role:'局部窗口',
+         M:[[0.43,0.22,0.15,0.11,0.09],[0.19,0.39,0.19,0.13,0.1],[0.12,0.19,0.38,0.19,0.12],[0.1,0.13,0.19,0.39,0.19],[0.09,0.11,0.15,0.22,0.43]],
+         read:'仍以主对角线为峰向两侧衰减——局部窗口头只关心"近处"，句子换了它的图案也不变。'}
+       ]}
+    ];
+
+    /* ============ DOM ============ */
+    function $(id){ return document.getElementById(id); }
+    var root=document.querySelector('.dz-mh');
+    var wallEl=$('dz-mh-wall'), bigEl=$('dz-mh-big'), readEl=$('dz-mh-read'),
+        lgEl=$('dz-mh-lg'), tourBtn=$('dz-mh-tour'), resetBtn=$('dz-mh-reset');
+    if(!root||!wallEl||!bigEl||!readEl) return;
+
+    function cssVar(name){
+      var v=getComputedStyle(root).getPropertyValue(name);
+      return (v||'').trim();
+    }
+    function hexToRgb(h){
+      h=h.replace('#','');
+      if(h.length===3) h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+      return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];
+    }
+    function heatColor(t){
+      var lo=hexToRgb(cssVar('--heat-lo')||'#F5F1E8'), hi=hexToRgb(cssVar('--heat-hi')||'#2B4BD8');
+      var c=lo.map(function(v,i){ return Math.round(v+(hi[i]-v)*Math.max(0,Math.min(1,t))); });
+      return 'rgb('+c[0]+','+c[1]+','+c[2]+')';
+    }
+    lgEl.style.background='linear-gradient(90deg,'+(cssVar('--heat-lo')||'#F5F1E8')+','+(cssVar('--heat-hi')||'#2B4BD8')+')';
+
+    /* ============ 状态 ============ */
+    var state={sent:0, sel:0, tour:false, timer:null};
+
+    /* ============ 渲染：8 张小图 ============ */
+    function renderWall(){
+      wallEl.innerHTML='';
+      var sent=SENTS[state.sent];
+      sent.heads.forEach(function(h,hi){
+        var card=document.createElement('button');
+        card.type='button';
+        card.className='dz-head-card'+(hi===state.sel?' is-sel':'')+(state.tour&&hi===state.sel?' is-tour':'');
+        card.setAttribute('aria-label','查看'+h.name+'：'+h.role);
+        var nm=document.createElement('div'); nm.className='dz-head-name'; nm.textContent=h.name;
+        var rl=document.createElement('div'); rl.className='dz-head-role'; rl.textContent=h.role;
+        card.appendChild(nm); card.appendChild(rl);
+        var tb=document.createElement('table'); tb.className='dz-mini';
+        for(var i=0;i<5;i++){
+          var tr=document.createElement('tr');
+          for(var j=0;j<5;j++){
+            var td=document.createElement('td');
+            td.style.background=heatColor(h.M[i][j]);
+            tr.appendChild(td);
+          }
+          tb.appendChild(tr);
+        }
+        card.appendChild(tb);
+        card.addEventListener('click',function(){ stopTour(); state.sel=hi; render(); });
+        wallEl.appendChild(card);
+      });
+    }
+
+    /* ============ 渲染：放大大图 + 解读 ============ */
+    function renderBig(){
+      var sent=SENTS[state.sent], h=sent.heads[state.sel], words=sent.words;
+      bigEl.innerHTML='';
+      var tr=document.createElement('tr');
+      var corner=document.createElement('th'); corner.textContent=h.name; tr.appendChild(corner);
+      words.forEach(function(w){
+        var th=document.createElement('th'); th.textContent=w; tr.appendChild(th);
+      });
+      bigEl.appendChild(tr);
+      for(var i=0;i<5;i++){
+        var row=document.createElement('tr');
+        var th2=document.createElement('th'); th2.textContent=words[i]; row.appendChild(th2);
+        for(var j=0;j<5;j++){
+          var td=document.createElement('td');
+          td.textContent=h.M[i][j].toFixed(2);
+          td.style.background=heatColor(h.M[i][j]);
+          row.appendChild(td);
+        }
+        bigEl.appendChild(row);
+      }
+      readEl.innerHTML='<span class="dz-role-tag">'+h.name+' · '+h.role+'</span>'+
+        '<div>句：<b>「'+words.join(' ')+'」</b></div>'+
+        '<p style="margin:.4em 0 0">'+h.read+'</p>'+
+        '<p style="margin:.6em 0 0;color:var(--muted);font-size:.82rem">行 = 谁提问，列 = 看谁。每个头的输出是一份 [5×d_v] 的"意见"，8 份意见拼接后再经 W_O 混合——对应正文图 4-1 的流程。</p>';
+    }
+
+    function render(){ renderWall(); renderBig(); }
+
+    /* ============ 轮播与重置 ============ */
+    function stopTour(){
+      state.tour=false;
+      if(state.timer){ clearInterval(state.timer); state.timer=null; }
+      tourBtn.textContent='▶ 逐头轮播';
+      tourBtn.classList.remove('is-on');
+    }
+    function toggleTour(){
+      if(state.tour){ stopTour(); renderWall(); return; }
+      state.tour=true;
+      tourBtn.textContent='⏸ 暂停轮播';
+      tourBtn.classList.add('is-on');
+      render();
+      state.timer=setInterval(function(){
+        state.sel=(state.sel+1)%8;
+        render();
+      },2200);
+    }
+    tourBtn.addEventListener('click',toggleTour);
+    resetBtn.addEventListener('click',function(){
+      stopTour(); state.sel=0; render();
+    });
+
+    var sentBtns=document.querySelectorAll('.dz-mh .dz-sent');
+    sentBtns.forEach(function(btn){
+      btn.addEventListener('click',function(){
+        stopTour();
+        sentBtns.forEach(function(b){ b.classList.remove('is-on'); });
+        btn.classList.add('is-on');
+        state.sent=parseInt(btn.getAttribute('data-i'),10);
+        state.sel=0;
+        render();
+      });
+    });
+
+    render();
+  }catch(err){
+    var host=document.querySelector('.dz-mh');
+    if(host){
+      var e=document.createElement('div');
+      e.className='dz-err';
+      e.textContent='演示初始化失败：'+(err&&err.message?err.message:err);
+      host.appendChild(e);
+    }
+  }
+})();
+</script>
+</div>

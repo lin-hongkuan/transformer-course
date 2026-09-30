@@ -1,0 +1,89 @@
+<title>Transformer 图解讲义</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;900&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="parts.css">
+
+<div class="paper-grid" aria-hidden="true"></div>
+
+<header class="topbar">
+  <span class="tb-mark" aria-hidden="true">T</span>
+  <span class="tb-title">Transformer 图解讲义</span>
+  <span class="tb-spacer"></span>
+  <button class="tb-btn" id="toc-jump" type="button" onclick="document.querySelector('.toc').scrollIntoView({behavior:'smooth',block:'start'})">目录</button>
+  <button class="tb-btn" id="theme-btn" type="button">☾ 暗色</button>
+  <div class="progress-track"><div class="progress-bar" id="progress-bar"></div></div>
+</header>
+
+<div class="shell">
+  <div class="hero-zone">
+    <div class="hero">
+      <div>
+        <p class="kicker">零基础 · 图解 · 可交互</p>
+        <h1>彻底搞懂<br><span class="accent">Transformer</span><br>从单词到注意力</h1>
+        <p class="sub">一份写给零基础读者的图解讲义。不堆公式，先讲直觉；每个数字都亲手算一遍，每个模块都有可以上手把玩的演示。读完你将完整理解现代大语言模型的心脏。</p>
+        <div class="meta-chips">
+          <span class="kbd-chip">10 章</span>
+          <span class="kbd-chip">10 个交互演示</span>
+          <span class="kbd-chip">全程手算示例</span>
+          <span class="kbd-chip">约 3 小时</span>
+        </div>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#ch00">开始阅读 →</a>
+          <a class="btn btn-ghost" href="#ch03">直接跳到注意力</a>
+        </div>
+      </div>
+      <div class="hero-art">
+        <div class="hero-canvas-wrap">
+          <canvas id="hero-canvas" role="img" aria-label="动画示意图：注意力权重在词元之间流动"></canvas>
+          <span class="hc-cap">live · 注意力权重随查询词流动的示意</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <aside class="toc-col">
+      <nav class="toc" aria-label="目录">
+        <h2>Contents · 目录</h2>
+        <ol>
+          <li><a href="#ch00" data-ch="ch00"><span class="toc-num">00</span><span>序言 · 这本书怎么读</span></a></li>
+          <li><a href="#ch01" data-ch="ch01"><span class="toc-num">01</span><span>为什么需要 Transformer</span></a></li>
+          <li><a href="#ch02" data-ch="ch02"><span class="toc-num">02</span><span>词嵌入与位置编码</span></a></li>
+          <li><a href="#ch03" data-ch="ch03"><span class="toc-num">03</span><span>注意力机制</span></a></li>
+          <li><a href="#ch04" data-ch="ch04"><span class="toc-num">04</span><span>多头注意力</span></a></li>
+          <li><a href="#ch05" data-ch="ch05"><span class="toc-num">05</span><span>前馈网络与残差归一化</span></a></li>
+          <li><a href="#ch06" data-ch="ch06"><span class="toc-num">06</span><span>完整的编码器–解码器</span></a></li>
+          <li><a href="#ch07" data-ch="ch07"><span class="toc-num">07</span><span>训练过程</span></a></li>
+          <li><a href="#ch08" data-ch="ch08"><span class="toc-num">08</span><span>推理与解码策略</span></a></li>
+          <li><a href="#ch09" data-ch="ch09"><span class="toc-num">09</span><span>现代变体与之后的地图</span></a></li>
+        </ol>
+        <p class="toc-foot">参考：Vaswani et al. 2017 · CS224n / CS336 课程脉络</p>
+      </nav>
+    </aside>
+
+    <main class="reading" id="chapters">
+      <div class="part-skeleton" id="sk-part01"><div class="sk-bar" style="width:38%"></div><div class="sk-bar"></div><div class="sk-bar" style="width:82%"></div>正在装载 第 0–1 章…</div>
+      <div class="part-skeleton" id="sk-part02"><div class="sk-bar" style="width:38%"></div><div class="sk-bar"></div><div class="sk-bar" style="width:82%"></div>正在装载 第 2 章…</div>
+      <div class="part-skeleton" id="sk-part03"><div class="sk-bar" style="width:38%"></div><div class="sk-bar"></div><div class="sk-bar" style="width:82%"></div>正在装载 第 3 章…</div>
+      <div class="part-skeleton" id="sk-part04"><div class="sk-bar" style="width:38%"></div><div class="sk-bar"></div><div class="sk-bar" style="width:82%"></div>正在装载 第 4 章…</div>
+      <div class="part-skeleton" id="sk-part05"><div class="sk-bar" style="width:38%"></div><div class="sk-bar"></div><div class="sk-bar" style="width:82%"></div>正在装载 第 5 章…</div>
+      <div class="part-skeleton" id="sk-part06"><div class="sk-bar" style="width:38%"></div><div class="sk-bar"></div><div class="sk-bar" style="width:82%"></div>正在装载 第 6 章…</div>
+      <div class="part-skeleton" id="sk-part07"><div class="sk-bar" style="width:38%"></div><div class="sk-bar"></div><div class="sk-bar" style="width:82%"></div>正在装载 第 7 章…</div>
+      <div class="part-skeleton" id="sk-part08"><div class="sk-bar" style="width:38%"></div><div class="sk-bar"></div><div class="sk-bar" style="width:82%"></div>正在装载 第 8 章…</div>
+      <div class="part-skeleton" id="sk-part09"><div class="sk-bar" style="width:38%"></div><div class="sk-bar"></div><div class="sk-bar" style="width:82%"></div>正在装载 第 9 章…</div>
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <h2>延伸阅读</h2>
+    <ul>
+      <li><a href="https://arxiv.org/abs/1706.03762" target="_blank" rel="noopener">Vaswani et al., “Attention Is All You Need”, 2017（原始论文）</a></li>
+      <li><a href="https://jalammar.github.io/illustrated-transformer/" target="_blank" rel="noopener">Jay Alammar, The Illustrated Transformer（经典图解）</a></li>
+      <li><a href="https://web.stanford.edu/~jurafsky/slp3/" target="_blank" rel="noopener">Jurafsky &amp; Martin, Speech and Language Processing（第 9–10 章）</a></li>
+      <li><a href="https://www.youtube.com/playlist?list=PLoROMvodv4rMFqRtEuo6SGjY4XbRIVRd4" target="_blank" rel="noopener">Stanford CS224n 公开课</a> · <a href="https://stanford-cs336.github.io/" target="_blank" rel="noopener">Stanford CS336（从零造 LLM）</a></li>
+      <li><a href="https://bbycroft.net/llm" target="_blank" rel="noopener">LLM Visualization（3D 交互可视化）</a></li>
+    </ul>
+    <p class="fin">— 完 · Fin —</p>
+  </footer>
+</div>
+
+<script src="frame.js"></script>

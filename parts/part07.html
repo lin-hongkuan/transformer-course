@@ -1,0 +1,527 @@
+<section class="chapter" id="ch07">
+  <header class="ch-head">
+    <p class="ch-eyebrow">第 7 章 · 训练过程</p>
+    <h2>模型是怎么学会的：从 loss 到 Adam 的完整一天</h2>
+    <p class="ch-lede">前面六章我们搭好了一台精密的机器，但它此刻的 6500 万个参数全是随机数——输出纯属胡言乱语。本章回答一个问题：这台机器如何仅通过"看海量文本 + 自我批改"变成语言大师？学完你将理解交叉熵损失、反向传播、Adam 优化器、学习率 warmup、dropout 与 label smoothing，并能在交互模拟器里亲手把训练"玩崩"再救回来。</p>
+  </header>
+
+  <p>先立一个本章的"总问题"：假设你是这台机器的教练，你手里只有三样东西——海量文本、一个能打分（loss）的批改器、一支能微调每个参数的笔。怎么安排每天的训练，才能让机器进步最快、最稳？本章每个小节就是教练手册的一页：先确定考什么题（训练目标），再确定怎么打分（交叉熵），再确定怎么把分数变成修改意见（反向传播），再确定下笔的力度（优化器与学习率），最后加上防作弊条款（正则化）。</p>
+
+  <h3><span class="sec-no">7.1</span> 训练目标：预测下一个词，仅此而已</h3>
+
+  <p>Transformer 的全部训练目标可以浓缩成一句话：<mark>给定前面的词，预测下一个词</mark>。我们在<a href="#ch01" class="xref">第 1 章</a>就见过这个任务，现在要用它来驱动训练。</p>
+
+  <p>拿一句话做例子。假设训练语料里有这样一句：</p>
+
+  <div class="formula">「我 今天 心情 很 好」</div>
+
+  <p>这句话会被拆成一连串训练样本——模型每看到一个前缀，就要预测下一个词：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>模型看到的前文</th><th>应该预测的下一个词</th><th>说明</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>我</td><td>今天</td><td>第 1 题</td></tr>
+        <tr><td>我 今天</td><td>心情</td><td>第 2 题</td></tr>
+        <tr><td>我 今天 心情</td><td>很</td><td>第 3 题</td></tr>
+        <tr><td>我 今天 心情 很</td><td>好</td><td>第 4 题</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>注意一个关键事实：<strong>一句话 5 个词，就同时变成了 4 道题</strong>。更妙的是，这 4 道题可以<mark>并行</mark>地一起算——还记得<a href="#ch06" class="xref">第 6 章</a>的因果掩码吗？掩码保证模型在回答第 3 题时偷看不到第 4 题的答案，所以我们可以把整句话一次性喂进去，让所有位置同时考试、同时批改。这正是 Transformer 比 RNN 快得多的根本原因：RNN 只能一题一题顺序考，Transformer 是整张卷子一起发。</p>
+
+  <h3><span class="sec-no">7.2</span> 训练数据：从"一本课本"到"整座图书馆"</h3>
+
+  <p>训练数据从哪来？答案朴素得惊人：<strong>人类已经写好的全部文字</strong>。网页、书籍、论文、代码、对话记录……不需要任何人工标注，因为"下一个词是什么"这个答案天然就藏在文本里——<mark>文本本身就是题目，文本本身就是答案</mark>。这种"数据自带答案"的训练方式叫<strong>自监督学习（self-supervised learning）</strong>。</p>
+
+  <p>规模的直觉：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>模型（年份）</th><th>训练数据规模</th><th>粗略类比（量级估算）</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Transformer 原论文（2017，翻译任务）</td><td>450 万句英德句对（WMT 2014）</td><td>一座小型图书馆的外语书架</td></tr>
+        <tr><td>BERT（2018）</td><td>约 33 亿词（英文维基 + BookCorpus）</td><td>一个人每天读 8 小时、连续读 300 年</td></tr>
+        <tr><td>GPT-3（2020）</td><td>3000 亿 token</td><td>把互联网公开文字的一大块压缩进显存</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>"token"（词元）大致是"词"的单位：英文约 0.75 个词一个 token，中文约 1.5~2 个汉字一个 token。GPT-3 训练时实际"看过"的词数，相当于全人类图书馆藏书总和的一个可观比例。量变引起质变——这是大模型时代最重要的经验。</p>
+
+  <p>数据质量同样重要。想象两个学生：一个读了 300 年精挑细选的好书，另一个刷了 300 年评论区骂战——后者的"语感"可想而知。所以真实的训练流水线里，清洗（去重、过滤乱码与垃圾、去除隐私信息）往往占据比训练本身更多的人力。原论文用的是经过精心整理的 WMT 翻译句对；GPT 系列则发展出了一整套从 Common Crawl 网页中筛选高质量文本的方法。对零基础读者，记住一句话即可：<mark>垃圾进，垃圾出（garbage in, garbage out）</mark>——模型是数据的镜子。</p>
+
+  <div class="callout callout-info">
+    <p class="callout-title">"epoch" 是什么</p>
+    <p>训练资料里常见 epoch（轮次）这个词：把全部训练数据完整过一遍叫一个 epoch。原论文 base 模型训练 10 万步，每步约 2.5 万 token，累计看了约 25 亿 token——相对于 450 万句的语料，相当于把数据集反复读了几十遍。大模型时代趋势反过来：数据多到读不完，GPT-3 对大部分数据只看了不到一遍。</p>
+  </div>
+
+  <h3><span class="sec-no">7.3</span> 教师强制：训练时的"老师报答案"</h3>
+
+  <p>这里有一个微妙的问题。做翻译任务时（回忆<a href="#ch06" class="xref">第 6 章</a>的编码器-解码器），解码器要一个一个叫出英文词。问题是：<strong>训练时，解码器每一步的输入是什么？</strong></p>
+
+  <div class="cols-2">
+    <div>
+      <h4>推理时（真正使用模型）</h4>
+      <p>解码器只能吃<strong>自己上一步的输出</strong>：第一步吐出 "I"，第二步把 "I" 喂回去，吐出 "love"，再把 "I love" 喂回去……一步错，步步错，错误会滚雪球。这叫<strong>自回归（autoregressive）</strong>生成。</p>
+    </div>
+    <div>
+      <h4>训练时（教师强制）</h4>
+      <p>我们<strong>直接把真实答案喂进去</strong>：不管模型第一步吐了什么鬼，第二步的输入都是正确的 "I"，第三步的输入都是正确的 "I love"。就像老师报正确答案让你对照着改，而不是让你在自己错误的路上越走越远。这叫<strong>教师强制（teacher forcing）</strong>。</p>
+    </div>
+  </div>
+
+  <p>为什么训练要用教师强制？两个原因：</p>
+
+  <ol>
+    <li><strong>稳定</strong>：如果训练时也用模型自己的输出当输入，那么模型前期输出全是乱码，乱码又当输入，误差指数级放大，训练根本无法收敛。</li>
+    <li><strong>并行</strong>：教师强制下，所有位置的"输入"都是已知的（就是真实句子的前缀），整句话可以一次算完。推理时的自回归只能一个一个叫，快不起来。</li>
+  </ol>
+
+  <div class="callout callout-info">
+    <p class="callout-title">一句话记住</p>
+    <p>训练 = 老师念答案，全班跟着写，写完对照批改；推理 = 闭卷考试，自己写一句接一句，写错也回不了头。</p>
+  </div>
+
+  <h3><span class="sec-no">7.4</span> 交叉熵损失：把"答得怎么样"变成一个数</h3>
+
+  <p>训练的本质是"批改作业"。批改需要一个分数：模型答得越离谱，分数越难看。这个分数叫<strong>损失（loss）</strong>。语言模型用的损失函数叫<strong>交叉熵损失（cross-entropy loss）</strong>。我们从零把它推一遍。</p>
+
+  <h4>第一步：模型输出的是一个概率分布</h4>
+
+  <p>回忆<a href="#ch06" class="xref">第 6 章</a>：解码器最后经过一个线性层 + softmax，对词表里<mark>每一个词</mark>都给出"下一个词是它"的概率，所有概率加起来等于 1。假设词表只有 5 个词：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>词</th><th>模型给的概率</th><th>是不是正确答案？</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>好</td><td>0.60</td><td><strong>是（真正的下一个词）</strong></td></tr>
+        <tr><td>棒</td><td>0.15</td><td>否</td></tr>
+        <tr><td>坏</td><td>0.10</td><td>否</td></tr>
+        <tr><td>多</td><td>0.10</td><td>否</td></tr>
+        <tr><td>天</td><td>0.05</td><td>否</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>第二步：我们只关心正确词的概率</h4>
+
+  <p>模型的"作业"好不好，只看一件事：<mark>它给正确词分了多少概率</mark>。分给正确词 0.6，说明它相当有把握；只给 0.1，说明它基本在瞎猜。于是损失的第一版定义呼之欲出：</p>
+
+  <div class="formula">loss = <span class="op">−</span> log <span class="hl">p<sub>正确词</sub></span></div>
+
+  <p>为什么要取 log、为什么要加负号？先看手算。用自然对数 ln：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>模型给正确词的概率 p</th><th>loss = −ln p</th><th>含义</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>0.6</td><td>−ln 0.6 ≈ <strong>0.51</strong></td><td>还不错，扣一点分</td></tr>
+        <tr><td>0.1</td><td>−ln 0.1 ≈ <strong>2.30</strong></td><td>很差，重罚</td></tr>
+        <tr><td>0.99</td><td>−ln 0.99 ≈ 0.01</td><td>几乎满分，几乎不扣分</td></tr>
+        <tr><td>0.01</td><td>−ln 0.01 ≈ 4.61</td><td>自信地答错，罚到肉疼</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>为什么是 log？两个理由</h4>
+
+  <ol>
+    <li><strong>连乘变加法</strong>。一句话有成千上万个位置，整句话的概率是每个位置概率的<mark>连乘</mark>：0.6 × 0.15 × 0.9 × …… 几千个小于 1 的数连乘，结果会小到计算机存不下（下溢）。取 log 后，连乘变成连加：log(a·b) = log a + log b，数值稳定，而且可以逐项求导。</li>
+    <li><strong>重罚"自信的错误"</strong>。看上面表格最后一行：给正确词只分 0.01（意味着模型把 0.99 的信心押在错误答案上），loss 高达 4.61；而给 0.6 时只扣 0.51。log 的形状决定了：越自信的错误，惩罚越狠，而且是<mark>不成比例地狠</mark>。这正是我们想要的学习信号。</li>
+  </ol>
+
+  <p>至于负号：概率 p 永远 ≤ 1，所以 ln p 永远 ≤ 0，加个负号让 loss 变成正数，"分越低越好"，符合直觉。</p>
+
+  <h4>交叉熵的全貌与 one-hot 视角</h4>
+
+  <p>严格地，交叉熵是对<strong>两个概率分布</strong>的比较：模型输出的分布 q，和"标准答案"分布 p。标准答案是什么分布？正确词概率 100%，其余全是 0——这就是<a href="#ch02" class="xref">第 2 章</a>讲过的 <strong>one-hot（独热）向量</strong>：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>词</th><th>好</th><th>棒</th><th>坏</th><th>多</th><th>天</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>标准答案分布 p（one-hot）</td><td>1</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+        <tr><td>模型输出分布 q</td><td>0.60</td><td>0.15</td><td>0.10</td><td>0.10</td><td>0.05</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>交叉熵的完整定义是：</p>
+
+  <div class="formula">loss = <span class="op">−</span> Σ<sub>i</sub> p<sub>i</sub> · log q<sub>i</sub></div>
+
+  <p>别被 Σ 吓到。把 one-hot 代进去：p 里只有正确词那一项是 1，其余全是 0，所以求和里 0·log q 的项全部消失，最后只剩：</p>
+
+  <div class="formula">loss = <span class="op">−</span> 1 × log q<sub>正确词</sub> = <span class="op">−</span>log <span class="hl">p<sub>正确词</sub></span></div>
+
+  <p>——正是我们前面的直觉公式。所以记住：<mark>交叉熵损失在分类任务里，就等于"负的正确答案概率的对数"</mark>。训练的全部目标，就是让模型给正确词的概率越来越大，让 loss 越来越接近 0。</p>
+
+  <div class="callout callout-tip">
+    <p class="callout-title">一句话记住交叉熵</p>
+    <p>你押了多少在正确答案上？押得多，扣得少；押得少还嘴硬（把概率全押给错误答案），就重罚。loss = −log(押在正确答案上的赌注)。</p>
+  </div>
+
+  <h3><span class="sec-no">7.5</span> 训练主循环：一张图看懂数据怎么流</h3>
+
+  <p>有了损失函数，训练就是一个无限重复的循环：出题 → 作答 → 批改 → 订正。下面的图 7-1 把整个循环画出来，请对照着读：</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 760 470" role="img" aria-label="训练主循环数据流图">
+      <defs>
+        <marker id="arr-07a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"></path>
+        </marker>
+        <marker id="arr-07b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent2)"></path>
+        </marker>
+      </defs>
+
+      <!-- 数据 -->
+      <rect x="30" y="30" width="200" height="64" rx="10" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="130" y="56" text-anchor="middle" font-size="14" fill="var(--ink)" font-family="inherit">训练语料</text>
+      <text x="130" y="76" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">「我 今天 心情 很 好」× 亿万句</text>
+
+      <!-- 切分 -->
+      <rect x="30" y="150" width="200" height="64" rx="10" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="130" y="176" text-anchor="middle" font-size="14" fill="var(--ink)" font-family="inherit">取一个批次 batch</text>
+      <text x="130" y="196" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">如 64 句话 × 每句 10 个位置</text>
+
+      <line x1="130" y1="94" x2="130" y2="146" stroke="var(--accent)" stroke-width="2" marker-end="url(#arr-07a)"></line>
+
+      <!-- 前向 -->
+      <rect x="300" y="150" width="200" height="64" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"></rect>
+      <text x="400" y="172" text-anchor="middle" font-size="14" fill="var(--ink)" font-family="inherit">① 前向传播</text>
+      <text x="400" y="190" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">Transformer 逐层计算</text>
+      <text x="400" y="206" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">每个位置输出 [1×30522] 概率</text>
+
+      <line x1="230" y1="182" x2="296" y2="182" stroke="var(--accent)" stroke-width="2" marker-end="url(#arr-07a)"></line>
+
+      <!-- loss -->
+      <rect x="570" y="150" width="160" height="64" rx="10" fill="var(--accent2-soft)" stroke="var(--accent2)"></rect>
+      <text x="650" y="172" text-anchor="middle" font-size="14" fill="var(--ink)" font-family="inherit">② 算 loss</text>
+      <text x="650" y="190" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">对每个位置 −log p(正确词)</text>
+      <text x="650" y="206" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">再求平均 → 一个数</text>
+
+      <line x1="500" y1="182" x2="566" y2="182" stroke="var(--accent)" stroke-width="2" marker-end="url(#arr-07a)"></line>
+
+      <!-- 反向 -->
+      <rect x="570" y="300" width="160" height="64" rx="10" fill="var(--accent2-soft)" stroke="var(--accent2)"></rect>
+      <text x="650" y="326" text-anchor="middle" font-size="14" fill="var(--ink)" font-family="inherit">③ 反向传播</text>
+      <text x="650" y="344" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">链式法则逐层回传梯度</text>
+
+      <line x1="650" y1="214" x2="650" y2="296" stroke="var(--accent2)" stroke-width="2" marker-end="url(#arr-07b)"></line>
+
+      <!-- 更新 -->
+      <rect x="300" y="300" width="200" height="64" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"></rect>
+      <text x="400" y="326" text-anchor="middle" font-size="14" fill="var(--ink)" font-family="inherit">④ 优化器更新参数</text>
+      <text x="400" y="344" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">Adam：按梯度调 65M 个旋钮</text>
+
+      <line x1="566" y1="332" x2="504" y2="332" stroke="var(--accent2)" stroke-width="2" marker-end="url(#arr-07b)"></line>
+
+      <!-- 回到 batch -->
+      <path d="M300,332 L130,332 L130,218" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arr-07a)"></path>
+      <text x="208" y="352" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">取下一批，重复几十万次</text>
+
+      <!-- step 标签 -->
+      <text x="380" y="400" text-anchor="middle" font-size="12.5" fill="var(--muted)" font-family="inherit">一轮 ①→②→③→④ 叫一个 step（训练步）</text>
+      <text x="380" y="422" text-anchor="middle" font-size="12.5" fill="var(--muted)" font-family="inherit">原论文 base 模型训练了 10 万步，约 12 小时（8 张 P100 GPU）</text>
+    </svg>
+    <figcaption>图 7-1 · 训练主循环：出题（取 batch）→ 作答（前向）→ 批改（算 loss）→ 订正（反向传播 + 优化器更新），循环往复</figcaption>
+  </div>
+
+  <h3><span class="sec-no">7.6</span> 反向传播：一场"责任分摊"的复盘会</h3>
+
+  <p>算出了 loss = 2.30，接下来呢？这个分数要变成 6500 万个参数各自该调多少的"整改意见"。这件事由<strong>反向传播（backpropagation）</strong>完成，它的数学基础是微积分里的<strong>链式法则（chain rule）</strong>——但我们不推公式，只讲直觉。</p>
+
+  <h4>直觉一：传话游戏的复盘</h4>
+
+  <p>还记得<a href="#ch01" class="xref">第 1 章</a>用传话游戏比喻 RNN 吗？反向传播是传话游戏的"赛后复盘"：最后一棒发现自己传错了（loss 很大），于是一层层往回追责——"我错成这样，有多少是上一棒传给我的锅？上一棒的错，又有多少是上上一棒的锅？"每层接到"责任单"后，再按自己的过错比例继续往上传。传到哪一层，哪一层就照单调整自己的参数。</p>
+
+  <h4>直觉二：责任的数学度量 = 梯度</h4>
+
+  <p>每个参数分到的"责任"有个正式名字：<strong>梯度（gradient）</strong>。梯度的含义是——<mark>"如果这个参数调大一点点，loss 会变多大"</mark>。梯度大，说明这个参数对错误"贡献"大，要猛调；梯度小，说明它无关紧要，微调即可。梯度的正负号指明方向：正梯度意味着"调大参数会增大 loss"，所以要往反方向（调小）走。</p>
+
+  <h4>链式法则：责任单怎么层层传递</h4>
+
+  <p>Transformer 是一条长长的流水线：嵌入 → 注意力 → FFN → …… → softmax → loss。链式法则说：流水线上游某参数对 loss 的责任 = 沿途每一小段"放大倍数"的<mark>连乘</mark>。就像责任单在回传路上，每经过一层就被盖一个"本章贡献率"的章，最后到达某参数手里时，它的责任 = 所有章的乘积。</p>
+
+  <div class="formula">∂loss/∂w<sub>底层</sub> = ∂loss/∂输出 × ∂输出/∂第6层 × … × ∂第1层/∂w<sub>底层</sub></div>
+
+  <p>这就是图 7-1 里橙色箭头的含义：误差信号从 loss 出发，逆流而上，流过每一层，沿途给每个参数开出罚单。</p>
+
+  <div class="callout callout-info">
+    <p class="callout-title">为什么残差连接在这里救场</p>
+    <p>责任章一层层连乘，如果每层的"贡献率"都小于 1，传到最底层时罚单就小到约等于零——这就是<strong>梯度消失</strong>，深层网络学不会东西的头号元凶。<a href="#ch05" class="xref">第 5 章</a>的残差连接给梯度开了一条"直达高速公路"：x + F(x) 里那个 x 保证总有一条通路的责任率是 1，罚单不会被越传越薄。这就是为什么 Transformer 能堆到几十上百层。</p>
+  </div>
+
+  <h3><span class="sec-no">7.7</span> 优化器：从 SGD 到 Adam</h3>
+
+  <p>拿到了 6500 万张罚单（每个参数的梯度），怎么执行整改？这叫<strong>优化器（optimizer）</strong>的活。把训练想象成<mark>蒙眼下山</mark>：你站在山坡上（某个 loss 值），脚底能感到坡度（梯度），目标是走到谷底（loss 最小）。每一步朝哪个方向迈、迈多大，就是优化器要决定的事。</p>
+
+  <h4>SGD：最朴素的下山者</h4>
+
+  <p><strong>随机梯度下降（SGD, Stochastic Gradient Descent）</strong>的策略简单到一句话：感觉哪个方向最陡，就朝反方向迈固定大小的一步：</p>
+
+  <div class="formula">w<sub>新</sub> = w<sub>旧</sub> <span class="op">−</span> η × 梯度</div>
+
+  <p>η（读作 eta）是<strong>学习率（learning rate）</strong>——步长。它大，下山快但容易一脚跨过谷底、在两边来回震荡；它小，走得稳但慢得像蜗牛。SGD 还有两个毛病：在狭长的山谷里会沿谷壁来回蹦跶（震荡），走到平地又磨磨蹭蹭（梯度小就几乎不动）。</p>
+
+  <h4>Adam：带惯性又会自己调步长的下山者</h4>
+
+  <p><strong>Adam（Adaptive Moment Estimation，自适应矩估计）</strong>给 SGD 加了两个升级，记两个直觉就够：</p>
+
+  <ol>
+    <li><strong>动量（momentum）—— 带惯性</strong>。不再只看当前这一脚底的坡度，而是对最近一段路程的坡度做<mark>指数加权平均</mark>（近期权重大，远期权重小）。效果像推着雪球下山：在狭长山谷里，左右震荡的分量互相抵消，沿谷底的分量不断累积——不再蹦跶，直奔谷底。这个"惯性项"由超参数 β₁ 控制（β₁=0.9 表示 90% 的旧惯性 + 10% 的新梯度）。</li>
+    <li><strong>自适应学习率 —— 每个参数有自己的步长</strong>。Adam 同时跟踪每个参数梯度的"波动大小"（由 β₂ 控制，是梯度平方的滑动平均）。某个参数的梯度一直很平稳，说明方向可信，步长自动放大；某个参数的梯度忽大忽小像抽风，说明此处地形复杂，步长自动缩小。6500 万个参数，每个都有自己的"私人步长调节器"。</li>
+  </ol>
+
+  <p>原论文的超参数如下（这些数字至今仍是训练 Transformer 的常见起点）：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>超参数</th><th>原论文取值</th><th>控制什么</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>β₁</td><td>0.9</td><td>动量：惯性有多大（记住最近约 10 步的平均方向）</td></tr>
+        <tr><td>β₂</td><td>0.98</td><td>自适应步长：波动估计的时间窗（比常见的 0.999 更"短记忆"，响应更快）</td></tr>
+        <tr><td>ε</td><td>1×10⁻⁹</td><td>防止除以零的微小常数（步长 = 动量 ÷ (√波动 + ε)）</td></tr>
+        <tr><td>学习率</td><td>见下节的 warmup 曲线</td><td>全局步长的总闸门</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3><span class="sec-no">7.8</span> 学习率 warmup：先热身，再冲刺，最后减速</h3>
+
+  <p>原论文没有用固定学习率，而是用了一条会随训练步数变化的曲线：</p>
+
+  <div class="formula">lr(step) = d<sub>model</sub><sup>−0.5</sup> · min( step<sup>−0.5</sup>, step · warmup<sup>−1.5</sup> )</div>
+
+  <p>其中 d_model = 512，warmup = 4000 步。这条公式由两段组成，取两者中较小的那个：</p>
+
+  <ul>
+    <li>前 4000 步，第二项更小：lr 与 step <strong>成正比线性上升</strong>——这叫 <strong>warmup（热身）</strong>；</li>
+    <li>4000 步之后，第一项更小：lr 与 step<sup>−0.5</sup> 成正比<strong>缓慢下降</strong>——步数翻 4 倍，学习率减半。</li>
+  </ul>
+
+  <p>手算两个点验证一下。d_model<sup>−0.5</sup> = 512<sup>−0.5</sup> ≈ 0.0442：</p>
+
+  <ul>
+    <li>第 1000 步（热身期）：lr = 0.0442 × 1000 × 4000<sup>−1.5</sup> ≈ 0.0442 × 1000 / 253000 ≈ <code class="math">1.75×10⁻⁴</code>；</li>
+    <li>第 4000 步（峰值）：lr = 0.0442 × 4000 × 4000<sup>−1.5</sup> = 0.0442 / 63.25 ≈ <code class="math">7.0×10⁻⁴</code>；</li>
+    <li>第 16000 步（下降期）：lr = 0.0442 × 16000<sup>−0.5</sup> ≈ 0.0442 / 126.5 ≈ <code class="math">3.5×10⁻⁴</code>，恰好是峰值的一半——符合"步数翻 4 倍，学习率减半"。</li>
+  </ul>
+
+  <div class="fig">
+    <svg viewBox="0 0 760 340" role="img" aria-label="warmup 学习率曲线">
+      <defs>
+        <marker id="arr-07c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"></path>
+        </marker>
+      </defs>
+      <!-- 坐标轴 -->
+      <line x1="70" y1="290" x2="730" y2="290" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-07c)"></line>
+      <line x1="70" y1="290" x2="70" y2="30" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-07c)"></line>
+      <text x="726" y="312" text-anchor="end" font-size="12.5" fill="var(--muted)" font-family="inherit">训练步数 step</text>
+      <text x="60" y="40" text-anchor="end" font-size="12.5" fill="var(--muted)" font-family="inherit">lr</text>
+
+      <!-- 网格与刻度 -->
+      <line x1="202" y1="290" x2="202" y2="40" stroke="var(--line)" stroke-width="1" stroke-dasharray="4 4"></line>
+      <line x1="334" y1="290" x2="334" y2="40" stroke="var(--line)" stroke-width="1" stroke-dasharray="4 4"></line>
+      <line x1="466" y1="290" x2="466" y2="40" stroke="var(--line)" stroke-width="1" stroke-dasharray="4 4"></line>
+      <line x1="598" y1="290" x2="598" y2="40" stroke="var(--line)" stroke-width="1" stroke-dasharray="4 4"></line>
+      <text x="202" y="308" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">4000</text>
+      <text x="334" y="308" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">8000</text>
+      <text x="466" y="308" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">12000</text>
+      <text x="598" y="308" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">16000</text>
+      <text x="70" y="308" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">0</text>
+
+      <line x1="70" y1="104.3" x2="730" y2="104.3" stroke="var(--line)" stroke-width="1" stroke-dasharray="4 4"></line>
+      <text x="64" y="108" text-anchor="end" font-size="11.5" fill="var(--muted)" font-family="inherit">7.0e-4</text>
+      <line x1="70" y1="197.2" x2="730" y2="197.2" stroke="var(--line)" stroke-width="1" stroke-dasharray="4 4"></line>
+      <text x="64" y="201" text-anchor="end" font-size="11.5" fill="var(--muted)" font-family="inherit">3.5e-4</text>
+
+      <!-- warmup 曲线 -->
+      <path d="M70,290 L202,104.3 L334,158.4 L466,183.5 L598,197.2 L730,214.3" fill="none" stroke="var(--accent)" stroke-width="3"></path>
+
+      <!-- 峰值标注 -->
+      <circle cx="202" cy="104.3" r="5" fill="var(--accent2)"></circle>
+      <text x="214" y="88" font-size="12.5" fill="var(--accent2)" font-family="inherit">峰值：第 4000 步，lr ≈ 7×10⁻⁴</text>
+
+      <!-- 区域注释 -->
+      <text x="136" y="246" text-anchor="middle" font-size="12.5" fill="var(--muted)" font-family="inherit">热身期：lr 线性上升</text>
+      <text x="136" y="264" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">（参数还是乱的，小步试探）</text>
+      <text x="500" y="120" text-anchor="middle" font-size="12.5" fill="var(--muted)" font-family="inherit">下降期：lr ∝ step⁻⁰·⁵</text>
+      <text x="500" y="138" text-anchor="middle" font-size="11.5" fill="var(--muted)" font-family="inherit">（越接近谷底，步子越小越稳）</text>
+    </svg>
+    <figcaption>图 7-2 · 原论文的学习率 schedule：前 4000 步线性升温（warmup），之后按 step<sup>−0.5</sup> 缓慢降温</figcaption>
+  </div>
+
+  <p>为什么要先升后降？</p>
+
+  <ul>
+    <li><strong>先升（热身）</strong>：训练刚开始时，所有参数都是随机数，梯度又大又乱。此时如果学习率太大，一步就能把好容易学到的结构冲垮——就像蒙眼下山，刚出发时对地形一无所知，必须先用<mark>小碎步探路</mark>，等 Adam 的动量和波动估计积累了可靠的统计量（大约几千步），再放开步子。</li>
+    <li><strong>后降（退火）</strong>：训练后期，模型已经接近谷底，需要的是在谷底附近<mark>精细微调</mark>，而不是大步流星跨过谷底。学习率按 step<sup>−0.5</sup> 衰减，保证后期每一步都很温柔，loss 平稳收敛到最低点。</li>
+  </ul>
+
+  <h3><span class="sec-no">7.9</span> 正则化：防止模型"死记硬背"</h3>
+
+  <p>Transformer 有 6500 万个参数，而训练数据再多也是有限的。一个容量巨大的模型很容易走上邪路：<mark>把训练数据原样背下来</mark>，而不是学会语言的规律。背下来的模型在训练题上满分，遇到新句子就露馅——这叫<strong>过拟合（overfitting）</strong>。原论文用了两味药来预防：</p>
+
+  <h4>药一：Dropout（随机失活）= 随机遮住一些神经元</h4>
+
+  <p>每次前向传播时，<strong>随机让 10% 的神经元的输出直接归零</strong>（dropout 率 = 0.1），剩下的 90% 临时顶上。每次遮的神经元都不一样。</p>
+
+  <p>类比：一个小组做作业，如果每次讨论都随机让 10% 的组员"禁言"，那么小组就不能依赖任何一个人的"独门绝技"——每个人都必须学会独当一面，答案必须分摊在许多组员身上。对应到网络：特征不能押宝在少数神经元上，必须分散、冗余地存储。这样的网络更健壮，也更愿意学习"通用规律"而非"背诵特例"。</p>
+
+  <p>原论文把 dropout 0.1 加在每个子层（注意力、FFN）的输出之后、以及词嵌入与位置编码相加之后。<strong>注意：dropout 只在训练时开启</strong>，推理时全员到岗（输出相应缩放以保持数值期望一致）。</p>
+
+  <h4>药二：Label Smoothing（标签平滑）= 标准答案留 10% 余地</h4>
+
+  <p>回忆前面的 one-hot 目标分布：正确词概率 1，其余全 0。label smoothing 把它改成：正确词 0.9，剩下 0.1 平摊给词表里所有其他词。以我们 5 词词表为例：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>词</th><th>好</th><th>棒</th><th>坏</th><th>多</th><th>天</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>原始 one-hot 目标</td><td>1.0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+        <tr><td>平滑后目标（ε=0.1）</td><td>0.9</td><td>0.025</td><td>0.025</td><td>0.025</td><td>0.025</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>为什么这样有用？one-hot 相当于告诉模型："正确答案是 100%，其他选项是 0%，你必须把信心推到无穷大。"模型为了逼近这个不可能的目标，会把正确词与错误词的差距拉得越来越大——<mark>过度自信</mark>。平滑后的目标等于说："正确答案 90%，但给世界留 10% 的不确定性。"模型学到的是"很有把握但不狂妄"，泛化能力更强。原论文发现这一手让 BLEU 翻译分数实打实地提高了（尽管训练 loss 看起来略高）。</p>
+
+  <div class="callout callout-tip">
+    <p class="callout-title">两味药的统一视角</p>
+    <p>dropout 在<strong>结构</strong>上制造不确定性（随机关神经元），label smoothing 在<strong>目标</strong>上制造不确定性（答案不说死）。共同思想：别让模型在训练数据上过得太舒服，它才会学真正通用的本领。</p>
+  </div>
+
+  <h3><span class="sec-no">7.10</span> 训练成本：一组让你有直觉的量级数字</h3>
+
+  <p>训练大模型到底多贵？以 GPT-3（1750 亿参数）为例做个量级估算：</p>
+
+  <ul>
+    <li>训练总计算量约 <strong>3.14 × 10²³ 次浮点运算</strong>（FLOPs）——这个数字写全了是 314,000,000,000,000,000,000,000。</li>
+    <li>换算成硬件：约等于一张顶级 GPU 不停算上 <strong>300 多年</strong>；实际上用上千张 GPU 并行，几个月跑完。</li>
+    <li>换算成电费与租金：单次训练的算力成本约 <strong>数百万美元</strong>量级。</li>
+    <li>对比：原论文的 Transformer-base（6500 万参数）在 8 张 P100 上训练了约 12 小时。GPT-3 的参数量是它的约 2700 倍，数据量也大得多。</li>
+  </ul>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">以上是量级估算，不是精确报价</p>
+    <p>实际成本随硬件代际、利用率、云定价剧烈波动，具体数字请参考原始论文与公开分析。这里只想让你建立直觉：训练大模型 = 一座小型发电站 × 几个月。这也是为什么训练好的模型要被反复使用——下一章讲的推理优化（如 KV cache）就是"摊薄成本"的关键一环。</p>
+  </div>
+
+  <p>另一个重要推论：<strong>训练贵，所以训练次数少；推理便宜（单次），但调用次数以亿计</strong>。一个部署出去的模型，训练一次，却要在未来几年里回答天文数字的请求——推理阶段的每一次提速，都会被乘上亿倍放大。这直接引出<a href="#ch08" class="xref">第 8 章</a>的主题：KV cache 如何让自回归生成快上 N 倍。</p>
+
+  <h3><span class="sec-no">7.11</span> 亲手玩一次：交互训练模拟器</h3>
+
+  <p>纸上得来终觉浅。下面的模拟器让你亲手调学习率、开关 warmup 和 label smoothing，然后按下「开始训练」看 loss 曲线实时演化。建议依次尝试：</p>
+
+  <ol>
+    <li>先把学习率拉到 1（最大），点训练——看 loss 如何震荡发散；</li>
+    <li>再把学习率调到 0.001（最小）——看 loss 如何像蜗牛一样几乎不动；</li>
+    <li>调到 0.01~0.05 之间，并打开 warmup——看曲线如何平滑收敛；</li>
+    <li>最后打开 label smoothing——注意最终 loss 会停在一个略高的"地板"上，这不是 bug，是平滑目标的特性。</li>
+  </ol>
+
+  <div class="demo-frame" data-demo="demo-training">正在加载交互演示…</div>
+
+  <h3><span class="sec-no">7.12</span> 小结</h3>
+
+  <p>在收束之前，把整条流水线再用一个具体的小例子从头走一遍，作为全章的"总复习"。假设某一步训练中，模型看到前文「我 今天 心情 很」，词表 5 个词，正确答案「好」。模型输出的概率分布是 {好 0.60, 棒 0.15, 坏 0.10, 多 0.10, 天 0.05}。于是：</p>
+
+  <ol>
+    <li><strong>批改（前向终点）</strong>：loss = −ln(0.60) ≈ 0.51。</li>
+    <li><strong>追责（反向传播）</strong>：误差信号从 loss 逆流而上，穿过 softmax、输出线性层、6 层解码器……沿途按链式法则给 6500 万个参数各开一张罚单（梯度）。其中"把 logit 推向正确答案方向"的权重会收到"调大"的罚单，其余则相反。</li>
+    <li><strong>执行（Adam）</strong>：Adam 参考这个参数最近的平均罚单方向（动量，β₁=0.9）与波动大小（β₂=0.98），给每个参数算出本步该调多少。</li>
+    <li><strong>步长闸门（warmup schedule）</strong>：假设当前是第 2000 步，还在热身期，学习率只有峰值的一半（约 3.5×10⁻⁴），所有调整都打个五折——小心驶得万年船。</li>
+    <li><strong>防背诵（正则化）</strong>：这一步的前向计算里，有 10% 的神经元被 dropout 随机禁言；批改时，标准答案也不是 100% 的「好」，而是 90%「好」+ 10% 平摊（label smoothing）。</li>
+    <li><strong>循环</strong>：把同一批次其余 63 句话的 loss 一起平均，完成这一次参数更新；然后取下一批，回到第 1 步。十万步之后，loss 从 10 上下（随机猜测的水平）降到 1~2——模型出师了。</li>
+  </ol>
+
+  <ul>
+    <li>训练目标只有一句话：<strong>给定前文，预测下一个词</strong>。文本自带答案（自监督），一句话同时出 N−1 道题，靠因果掩码并行批改。</li>
+    <li><strong>教师强制</strong>：训练时把真实答案喂给解码器，稳定且可并行；推理时只能自回归，吃自己的输出。</li>
+    <li><strong>交叉熵损失</strong> = −log(模型分给正确词的概率)。给 0.6 → loss 0.51；给 0.1 → loss 2.30。log 让连乘变加法，并且重罚"自信的错误"。one-hot 目标下，交叉熵自动退化成这个简单形式。</li>
+    <li><strong>反向传播</strong> = 责任分摊复盘会：误差从 loss 逆流回每一层，链式法则把每层的"贡献率"连乘成每个参数的罚单（梯度）。残差连接保证罚单不会在深层网络里越传越薄。</li>
+    <li><strong>Adam</strong> = SGD + 动量（β₁=0.9，带惯性不蹦跶）+ 自适应步长（β₂=0.98，每个参数有自己的步长调节器），ε=10⁻⁹ 防除零。</li>
+    <li><strong>学习率 warmup</strong>：前 4000 步线性升温（参数乱，小步探路），之后按 step⁻⁰·⁵ 降温（接近谷底，精细微调）。</li>
+    <li><strong>Dropout 0.1</strong> 随机遮住神经元防死记硬背；<strong>label smoothing 0.1</strong> 给标准答案留 10% 余地防过度自信。</li>
+    <li>训练一次大模型 = 数百万美元量级；训练贵、推理量大，所以推理优化（下章 KV cache）极其重要。</li>
+  </ul>
+
+  <h3><span class="sec-no">7.13</span> 术语速查表</h3>
+
+  <p>本章出现的重要术语，一句话回顾（详细定义见正文对应小节）：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>术语</th><th>一句话解释</th><th>生活类比</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>自监督学习</td><td>数据自带答案，无需人工标注</td><td>用现成的小说当完形填空题</td></tr>
+        <tr><td>教师强制 teacher forcing</td><td>训练时解码器输入用真实答案而非自身输出</td><td>老师报答案让你对照着改</td></tr>
+        <tr><td>交叉熵损失</td><td>−log(分给正确词的概率)</td><td>押错宝押得越自信，罚得越狠</td></tr>
+        <tr><td>反向传播</td><td>链式法则逐层回传梯度</td><td>传话游戏赛后层层追责</td></tr>
+        <tr><td>梯度 gradient</td><td>参数对 loss 的"责任大小与方向"</td><td>罚单：谁贡献大谁多改</td></tr>
+        <tr><td>学习率 learning rate</td><td>每步调整的步长</td><td>蒙眼下山时一步迈多大</td></tr>
+        <tr><td>Adam</td><td>SGD + 动量 + 逐参数自适应步长</td><td>带惯性又会自己调步长的下山者</td></tr>
+        <tr><td>warmup</td><td>学习率先线性升、再按 step⁻⁰·⁵ 降</td><td>先热身慢跑，再冲刺，最后散步到终点</td></tr>
+        <tr><td>dropout</td><td>训练时随机关掉 10% 神经元</td><td>小组讨论随机禁言，人人都得会</td></tr>
+        <tr><td>label smoothing</td><td>目标分布留 10% 概率给其他词</td><td>标准答案也不说死，留有余地</td></tr>
+        <tr><td>过拟合 overfitting</td><td>背下训练题，遇到新题露馅</td><td>考试只背了习题集的学生</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3><span class="sec-no">7.14</span> 本章与前后章的关系</h3>
+
+  <p>训练（本章）与推理（<a href="#ch08" class="xref">第 8 章</a>）是同一个模型的两种生命形态。训练时我们拥有上帝视角：答案已知、教师强制、并行批改、梯度回传；推理时模型孤身作战：答案未知、自回归、逐词生成、没有梯度。两种形态共享同一套前向计算——你在<a href="#ch03" class="xref">第 3 章</a>到<a href="#ch06" class="xref">第 6 章</a>学到的注意力、多头、残差、掩码，在训练和推理中一字不差地复用。理解了这个对偶关系，下一章的解码策略（贪心、束搜索、温度采样）和 KV cache 就会顺理成章：它们都是在回答"推理这头如何又快又好"。</p>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">常见误区</p>
+    <p><strong>误区一："loss 降到 0 才算训练成功。"</strong>错。交叉熵的理论下限不是 0——语言本身有不确定性（"我心情很___"后面本来就可以接"好""棒""复杂"……），加上 label smoothing 故意留了 10% 余地，loss 停在某个大于 0 的"地板"上是健康的。追 0 反而意味着过拟合。</p>
+    <p><strong>误区二："学习率大一点，训练快一点。"</strong>错。过大的学习率会让参数在最优解两边来回震荡甚至发散（模拟器里能亲眼看到），反而更慢甚至训崩。学习率是最需要小心调的超参数，没有之一。</p>
+    <p><strong>误区三："教师强制下模型在作弊，学不到真本事。"</strong>不。教师强制只是训练技巧：批改时仍然按"模型自己给出的概率分布"算 loss，惩罚一点不少。真正的代价是训练-推理分布不一致（exposure bias）——推理时模型没见过自己的错误输出，可能一步错步步错。这是序列模型的经典难题，有 scheduled sampling 等缓解手段，但教师强制仍是绝对主流。</p>
+  </div>
+
+  <details class="quiz">
+    <summary>自测 1 · 词表有 5 个词，某位置模型给正确词的概率是 0.02。这一步的交叉熵损失约是多少？如果模型通过训练把它提到 0.8，loss 变成多少？</summary>
+    <div class="quiz-body">
+      <p>loss = −ln(0.02) ≈ 3.91；提升后 loss = −ln(0.8) ≈ 0.22。</p>
+      <p>对比体会 log 的非对称：概率从 0.02 提到 0.8（提升 40 倍），loss 从 3.91 降到 0.22。注意从 0.02 → 0.1（5 倍）loss 降 1.61，从 0.5 → 1.0（2 倍）loss 只降 0.69——log 对"低概率区"的改进奖励极大，这正是训练前期 loss 掉得快的原因。</p>
+    </div>
+  </details>
+
+  <details class="quiz">
+    <summary>自测 2 · 为什么原论文的学习率要在前 4000 步"先升温"？直接一开始就用峰值 7×10⁻⁴ 会怎样？</summary>
+    <div class="quiz-body">
+      <p>训练初期参数全是随机数，梯度方向混乱、方差巨大，Adam 的动量和二阶矩估计也还没积累起可靠统计。此时用大学习率，每一步都在被噪声带着乱跳，可能把网络推进糟糕的局部区域甚至直接发散。warmup 相当于让模型用小碎步先摸清地形（同时让 Adam 的统计量预热到稳定），几千步后再放开步长。实践中，去掉 warmup 常常导致 Transformer 训练前期 loss 剧烈震荡或卡在很差的位置。</p>
+    </div>
+  </details>
+
+  <details class="quiz">
+    <summary>自测 3 · label smoothing 把目标从"正确词 100%"改成"正确词 90%、其余 10% 平摊"。有人说这会让模型"学得不准"，你怎么看？</summary>
+    <div class="quiz-body">
+      <p>恰恰相反，这是有意为之的校准。one-hot 目标要求模型把正确词概率推向 1，这在数学上需要 logits 差距趋向无穷大——模型会变得过度自信，在训练集上表现完美，遇到新数据时微小的分布偏移就会被"自信的错判"放大。留 10% 余地相当于告诉模型"语言没有绝对"，学到的概率分布更接近真实的不确定性，泛化和校准都更好。原论文实测 label smoothing 0.1 提升了 BLEU 分数。代价是训练 loss 的"地板"变高了——但这是特性，不是缺陷。</p>
+    </div>
+  </details>
+
+</section>

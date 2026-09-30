@@ -1,0 +1,414 @@
+<div class="dz-emb">
+  <style>
+    .dz-emb { width: 100%; font-size: .95rem; }
+    .dz-emb .dz-tip {
+      margin: 0 0 12px; color: var(--muted); font-size: .88rem; line-height: 1.7;
+    }
+    .dz-emb .dz-stage {
+      position: relative; width: 100%; border: 1px solid var(--line);
+      border-radius: 12px; background: var(--paper); overflow: hidden;
+      touch-action: none;
+    }
+    .dz-emb svg { display: block; width: 100%; height: auto; user-select: none; }
+    .dz-emb .dz-word { cursor: pointer; }
+    .dz-emb .dz-word circle { transition: r .15s, opacity .15s; }
+    .dz-emb .dz-word text { transition: opacity .15s; }
+    .dz-emb .dz-panel {
+      margin-top: 12px; padding: 12px 14px; border: 1px dashed var(--line);
+      border-radius: 10px; background: var(--paper2);
+      font-family: var(--f-mono); font-size: .84rem; line-height: 1.8;
+      min-height: 96px; color: var(--ink);
+    }
+    .dz-emb .dz-panel .dz-p-title {
+      font: 700 .78rem/1.6 var(--f-body); color: var(--accent-ink); letter-spacing: .04em;
+    }
+    .dz-emb .dz-row { display: flex; justify-content: space-between; gap: 10px; }
+    .dz-emb .dz-row b { font-weight: 600; }
+    .dz-emb .dz-dist { color: var(--muted); }
+    .dz-emb .dz-hr { border: none; border-top: 1px dashed var(--line); margin: 8px 0; }
+    .dz-emb .dz-legend {
+      display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;
+    }
+    .dz-emb .dz-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      font: 500 .76rem/1 var(--f-body); color: var(--muted);
+      border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px;
+      background: var(--paper2);
+    }
+    .dz-emb .dz-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+
+    /* 向量运算面板 */
+    .dz-emb .dz-analogy { margin-top: 20px; border-top: 1px dashed var(--line); padding-top: 16px; }
+    .dz-emb .dz-analogy h5 {
+      margin: 0 0 4px; font: 700 .95rem/1.4 var(--f-body); color: var(--ink);
+    }
+    .dz-emb .dz-analogy .dz-sub { margin: 0 0 12px; color: var(--muted); font-size: .84rem; }
+    .dz-emb .dz-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+    .dz-emb .dz-btn {
+      appearance: none; border: 1px solid var(--line); background: var(--paper2);
+      color: var(--ink); border-radius: 9px; padding: 10px 16px;
+      font: 600 .85rem/1 var(--f-body); cursor: pointer; min-height: 42px;
+      transition: border-color .15s, color .15s, background .15s;
+    }
+    .dz-emb .dz-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .dz-emb .dz-btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+    .dz-emb .dz-status {
+      font-family: var(--f-mono); font-size: .84rem; color: var(--accent-ink);
+      background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+      border-radius: 8px; padding: 9px 12px; margin-top: 10px; min-height: 20px;
+    }
+    .dz-emb .dz-err {
+      color: var(--accent2); font-family: var(--f-mono); font-size: .85rem;
+      padding: 12px; border: 1px dashed var(--warn-line); border-radius: 8px;
+    }
+    @media (max-width: 560px) {
+      .dz-emb .dz-panel { font-size: .78rem; }
+      .dz-emb .dz-btn { flex: 1 1 auto; }
+    }
+  </style>
+
+  <p class="dz-tip">下面这块 2D 画布里撒了 16 个常见词，坐标是精心设计的「假嵌入」：意思越近，距离越近。<strong>把鼠标悬停（或手指点按）到任意一个词上</strong>，会高亮离它最近的 3 个邻居并显示距离——感受一下「语义近 = 距离近」。</p>
+
+  <div class="dz-stage">
+    <svg id="dz-emb-svg" viewBox="0 0 720 460" role="img" aria-label="二维词嵌入空间：悬停查看最近邻"></svg>
+  </div>
+
+  <div class="dz-panel" id="dz-emb-panel">
+    <p class="dz-p-title">最近邻面板</p>
+    <div id="dz-emb-panel-body">尚未选中任何词。悬停或点按画布中的词开始探索。</div>
+  </div>
+
+  <div class="dz-legend" id="dz-emb-legend"></div>
+
+  <div class="dz-analogy">
+    <h5>向量运算小剧场：国王 − 男人 + 女人 ≈ 王后</h5>
+    <p class="dz-sub">下半块画布固定放置四个词：国王(2,5)、王后(0,5)、男人(2,0)、女人(0,0)。按「播放」看向量箭头一步一步完成正文里的那道手算；「单步」逐段推进；「重置」回到起点。</p>
+    <div class="dz-stage">
+      <svg id="dz-emb-vec" viewBox="0 0 720 330" role="img" aria-label="向量加减箭头动画：国王减男人加女人约等于王后"></svg>
+    </div>
+    <div class="dz-controls">
+      <button class="dz-btn" id="dz-emb-play" type="button">▶ 播放</button>
+      <button class="dz-btn" id="dz-emb-step" type="button">单步 →</button>
+      <button class="dz-btn" id="dz-emb-reset" type="button">↺ 重置</button>
+    </div>
+    <div class="dz-status" id="dz-emb-status">就绪。坐标：国王 [2, 5]，男人 [2, 0]，女人 [0, 0]，王后 [0, 5]。</div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+    var ROOT = document.currentScript ? document.currentScript.parentNode : null;
+    function qs(s) { return ROOT ? ROOT.querySelector(s) : null; }
+    try {
+      /* ============ 主题颜色 ============ */
+      function cssVar(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      }
+      var C = {
+        ink: cssVar('--ink') || '#21252E',
+        muted: cssVar('--muted') || '#61687A',
+        line: cssVar('--line') || '#D9D2C0',
+        accent: cssVar('--accent') || '#2B4BD8',
+        accent2: cssVar('--accent2') || '#E05A12',
+        accent3: cssVar('--accent3') || '#0E7D5B',
+        paper2: cssVar('--paper2') || '#ECE6D8'
+      };
+      /* 四个语义簇各配一个颜色（全部来自框架变量） */
+      var CLUSTER_COLOR = {
+        '动物': C.accent2, '水果': C.accent3, '动作': C.accent, '颜色': C.muted
+      };
+
+      /* ============ 数据：16 个词的假 2D 嵌入 ============ */
+      var WORDS = [
+        { w: '猫',   x: 140, y: 120, c: '动物' },
+        { w: '狗',   x: 185, y: 155, c: '动物' },
+        { w: '兔子', x: 110, y: 175, c: '动物' },
+        { w: '老虎', x: 215, y: 105, c: '动物' },
+        { w: '苹果', x: 520, y: 320, c: '水果' },
+        { w: '香蕉', x: 565, y: 360, c: '水果' },
+        { w: '橙子', x: 475, y: 365, c: '水果' },
+        { w: '葡萄', x: 585, y: 305, c: '水果' },
+        { w: '跑',   x: 500, y: 90,  c: '动作' },
+        { w: '跳',   x: 555, y: 125, c: '动作' },
+        { w: '游泳', x: 465, y: 135, c: '动作' },
+        { w: '走路', x: 590, y: 80,  c: '动作' },
+        { w: '红色', x: 150, y: 330, c: '颜色' },
+        { w: '蓝色', x: 205, y: 370, c: '颜色' },
+        { w: '绿色', x: 110, y: 385, c: '颜色' },
+        { w: '黄色', x: 245, y: 320, c: '颜色' }
+      ];
+      function dist(a, b) {
+        var dx = a.x - b.x, dy = a.y - b.y;
+        return Math.sqrt(dx * dx + dy * dy);
+      }
+
+      /* ============ 第一部分：嵌入空间画布 ============ */
+      var svg = qs('#dz-emb-svg');
+      var panelBody = qs('#dz-emb-panel-body');
+      var NS = 'http://www.w3.org/2000/svg';
+      function el(tag, attrs) {
+        var e = document.createElementNS(NS, tag);
+        for (var k in attrs) e.setAttribute(k, attrs[k]);
+        return e;
+      }
+      /* 连线层在节点层之下 */
+      var linkLayer = el('g', {});
+      var nodeLayer = el('g', {});
+      svg.appendChild(linkLayer);
+      svg.appendChild(nodeLayer);
+
+      var nodes = [];
+      WORDS.forEach(function (wd, i) {
+        var g = el('g', { 'class': 'dz-word', tabindex: '0', role: 'button',
+          'aria-label': '词 ' + wd.w + '，类别 ' + wd.c });
+        var halo = el('circle', { cx: wd.x, cy: wd.y, r: 22, fill: 'transparent' });
+        var dot = el('circle', { cx: wd.x, cy: wd.y, r: 7,
+          fill: CLUSTER_COLOR[wd.c], stroke: 'none' });
+        var label = el('text', { x: wd.x, y: wd.y - 15, 'text-anchor': 'middle',
+          'font-size': '14', fill: C.ink, 'font-family': 'inherit' });
+        label.textContent = wd.w;
+        g.appendChild(halo); g.appendChild(dot); g.appendChild(label);
+        nodeLayer.appendChild(g);
+        nodes.push({ g: g, dot: dot, label: label, wd: wd, idx: i });
+        function onEnter() { select(i); }
+        function onLeave() { select(-1); }
+        g.addEventListener('pointerenter', onEnter);
+        g.addEventListener('pointerdown', function (ev) { ev.preventDefault(); select(i); });
+        g.addEventListener('focus', onEnter);
+        g.addEventListener('blur', onLeave);
+      });
+      svg.addEventListener('pointerleave', function () { select(-1); });
+
+      function select(idx) {
+        /* 清旧线 */
+        while (linkLayer.firstChild) linkLayer.removeChild(linkLayer.firstChild);
+        if (idx < 0) {
+          nodes.forEach(function (n) {
+            n.dot.setAttribute('r', 7);
+            n.dot.setAttribute('opacity', 1);
+            n.label.setAttribute('opacity', 1);
+          });
+          panelBody.textContent = '尚未选中任何词。悬停或点按画布中的词开始探索。';
+          return;
+        }
+        var me = WORDS[idx];
+        /* 找最近 3 个邻居 */
+        var ranked = WORDS.map(function (w, j) { return { j: j, d: dist(me, w) }; })
+          .filter(function (r) { return r.j !== idx; })
+          .sort(function (a, b) { return a.d - b.d; });
+        var top = ranked.slice(0, 3);
+        var topIdx = {};
+        top.forEach(function (r) { topIdx[r.j] = true; });
+
+        nodes.forEach(function (n) {
+          if (n.idx === idx) {
+            n.dot.setAttribute('r', 10); n.dot.setAttribute('opacity', 1);
+            n.label.setAttribute('opacity', 1);
+          } else if (topIdx[n.idx]) {
+            n.dot.setAttribute('r', 9); n.dot.setAttribute('opacity', 1);
+            n.label.setAttribute('opacity', 1);
+          } else {
+            n.dot.setAttribute('r', 6); n.dot.setAttribute('opacity', .3);
+            n.label.setAttribute('opacity', .3);
+          }
+        });
+        top.forEach(function (r, k) {
+          var w = WORDS[r.j];
+          var line = el('line', {
+            x1: me.x, y1: me.y, x2: w.x, y2: w.y,
+            stroke: CLUSTER_COLOR[me.c] === CLUSTER_COLOR[w.c] ? C.accent : C.muted,
+            'stroke-width': 3 - k * 0.7, 'stroke-dasharray': k === 0 ? 'none' : '5 4',
+            opacity: .85 - k * 0.2
+          });
+          linkLayer.appendChild(line);
+          var mx = (me.x + w.x) / 2, my = (me.y + w.y) / 2;
+          var bg = el('text', {
+            x: mx, y: my - 4, 'text-anchor': 'middle', 'font-size': '11.5',
+            fill: C.ink, 'font-family': '"JetBrains Mono", monospace'
+          });
+          bg.textContent = 'd=' + r.d.toFixed(0);
+          linkLayer.appendChild(bg);
+        });
+
+        var html = '<div class="dz-row"><b>选中：「' + me.w + '」</b>' +
+          '<span class="dz-dist">类别：' + me.c + '</span></div><hr class="dz-hr">';
+        top.forEach(function (r, k) {
+          var w = WORDS[r.j];
+          var same = w.c === me.c;
+          html += '<div class="dz-row"><span>第 ' + (k + 1) + ' 近：「' + w.w + '」' +
+            (same ? '（同类）' : '（跨类）') + '</span>' +
+            '<span class="dz-dist">距离 ' + r.d.toFixed(1) + '</span></div>';
+        });
+        var far = ranked[ranked.length - 1];
+        html += '<hr class="dz-hr"><div class="dz-row"><span>最远的词：「' +
+          WORDS[far.j].w + '」</span><span class="dz-dist">距离 ' + far.d.toFixed(1) + '</span></div>';
+        panelBody.innerHTML = html;
+      }
+
+      /* 图例 */
+      var legend = qs('#dz-emb-legend');
+      Object.keys(CLUSTER_COLOR).forEach(function (name) {
+        var chip = document.createElement('span');
+        chip.className = 'dz-chip';
+        var dot = document.createElement('span');
+        dot.className = 'dz-dot';
+        dot.style.background = CLUSTER_COLOR[name];
+        chip.appendChild(dot);
+        chip.appendChild(document.createTextNode(name));
+        legend.appendChild(chip);
+      });
+
+      /* ============ 第二部分：向量加减箭头动画 ============ */
+      var vsvg = qs('#dz-emb-vec');
+      var status = qs('#dz-emb-status');
+      /* 数学坐标 → 画布坐标：x 数学范围 -1..4，y 范围 -1..6.5 */
+      function MX(x) { return 90 + x * 130; }
+      function MY(y) { return 290 - y * 42; }
+
+      var defs = el('defs', {});
+      function marker(id, color) {
+        var m = el('marker', { id: id, viewBox: '0 0 10 10', refX: 9, refY: 5,
+          markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' });
+        var p = el('path', { d: 'M0,0 L10,5 L0,10 z', fill: color });
+        m.appendChild(p); defs.appendChild(m);
+      }
+      marker('dz-emb-arrA', C.accent);
+      marker('dz-emb-arrB', C.accent2);
+      marker('dz-emb-arrC', C.accent3);
+      vsvg.appendChild(defs);
+
+      /* 坐标轴 */
+      vsvg.appendChild(el('line', { x1: MX(-0.9), y1: MY(0), x2: MX(3.4), y2: MY(0),
+        stroke: C.muted, 'stroke-width': 1.2 }));
+      vsvg.appendChild(el('line', { x1: MX(0), y1: MY(-0.9), x2: MX(0), y2: MY(6.2),
+        stroke: C.muted, 'stroke-width': 1.2 }));
+      var axT = el('text', { x: MX(3.3), y: MY(0) + 22, 'font-size': 12, fill: C.muted, 'font-family': 'inherit' });
+      axT.textContent = '维度 1（≈ 性别）';
+      var ayT = el('text', { x: MX(0) + 8, y: MY(6.0), 'font-size': 12, fill: C.muted, 'font-family': 'inherit' });
+      ayT.textContent = '维度 2（≈ 皇室度）';
+      vsvg.appendChild(axT); vsvg.appendChild(ayT);
+
+      /* 四个固定词 */
+      var PTS = {
+        king:  { x: 2, y: 5, name: '国王', color: C.accent  },
+        queen: { x: 0, y: 5, name: '王后', color: C.accent2 },
+        man:   { x: 2, y: 0, name: '男人', color: C.muted   },
+        woman: { x: 0, y: 0, name: '女人', color: C.muted   }
+      };
+      Object.keys(PTS).forEach(function (k) {
+        var p = PTS[k];
+        vsvg.appendChild(el('circle', { cx: MX(p.x), cy: MY(p.y), r: 7, fill: p.color }));
+        var t = el('text', { x: MX(p.x) + 12, y: MY(p.y) + 5, 'font-size': 14.5,
+          fill: C.ink, 'font-family': 'inherit', 'font-weight': 600 });
+        t.textContent = p.name + ' [' + p.x + ', ' + p.y + ']';
+        vsvg.appendChild(t);
+      });
+      /* 网格参考线（国王-男人、女人-王后 的虚线框） */
+      vsvg.appendChild(el('line', { x1: MX(2), y1: MY(0), x2: MX(2), y2: MY(5),
+        stroke: C.line, 'stroke-width': 1, 'stroke-dasharray': '3 4' }));
+      vsvg.appendChild(el('line', { x1: MX(0), y1: MY(5), x2: MX(2), y2: MY(5),
+        stroke: C.line, 'stroke-width': 1, 'stroke-dasharray': '3 4' }));
+
+      /* 动画箭头：分三步
+         0: 国王(2,5) → 男人(2,0)   “− 男人” 的方向
+         1: 国王(2,5) → (0,5)       第一步结果 = 国王 − 男人（平移后的位移）
+         2: (0,5) → (0,5)+女人(0,0) 即加女人后仍指向王后         */
+      var animLayer = el('g', {});
+      vsvg.appendChild(animLayer);
+      var arrow = el('line', { x1: 0, y1: 0, x2: 0, y2: 0,
+        stroke: C.accent2, 'stroke-width': 3, 'marker-end': 'url(#dz-emb-arrB)',
+        opacity: 0 });
+      animLayer.appendChild(arrow);
+      var ghost = el('line', { x1: 0, y1: 0, x2: 0, y2: 0,
+        stroke: C.accent, 'stroke-width': 2.4, 'marker-end': 'url(#dz-emb-arrA)',
+        'stroke-dasharray': '6 5', opacity: 0 });
+      animLayer.appendChild(ghost);
+      var resultRing = el('circle', { cx: MX(0), cy: MY(5), r: 14, fill: 'none',
+        stroke: C.accent3, 'stroke-width': 2.6, 'stroke-dasharray': '4 4', opacity: 0 });
+      animLayer.appendChild(resultRing);
+
+      var STEPS = [
+        {
+          from: { x: 2, y: 5 }, to: { x: 2, y: 0 }, color: 'B',
+          text: '第 ① 步：从「国王」出发，减去「男人」——箭头指向男性成分的方向，我们要把它去掉。[2,5] − [2,0] = [0,5]。'
+        },
+        {
+          from: { x: 2, y: 5 }, to: { x: 0, y: 5 }, color: 'A',
+          text: '第 ① 步结果：位移后到达 [0, 5]——「去掉男性成分的国王」。'
+        },
+        {
+          from: { x: 0, y: 5 }, to: { x: 0, y: 5 }, color: 'B', zero: true,
+          text: '第 ② 步：再加上「女人」[0, 0]（本例中女人恰在原点，加它等于原地不动），结果仍是 [0, 5]。'
+        },
+        {
+          ring: true,
+          text: '查表：[0, 5] 正是「王后」的坐标。国王 − 男人 + 女人 ≈ 王后 ✓'
+        }
+      ];
+      var cur = -1, playing = false, timer = null;
+
+      function renderStep(k) {
+        arrow.setAttribute('opacity', 0);
+        ghost.setAttribute('opacity', 0);
+        resultRing.setAttribute('opacity', 0);
+        if (k < 0) { status.textContent = '就绪。坐标：国王 [2, 5]，男人 [2, 0]，女人 [0, 0]，王后 [0, 5]。'; return; }
+        var s = STEPS[k];
+        if (s.ring) {
+          /* 保留上一步箭头 + 结果高亮圈 */
+          var prev = STEPS[2];
+          arrow.setAttribute('x1', MX(prev.from.x)); arrow.setAttribute('y1', MY(prev.from.y));
+          arrow.setAttribute('x2', MX(prev.to.x));   arrow.setAttribute('y2', MY(prev.to.y));
+          arrow.setAttribute('opacity', .9);
+          resultRing.setAttribute('opacity', 1);
+        } else {
+          arrow.setAttribute('x1', MX(s.from.x)); arrow.setAttribute('y1', MY(s.from.y));
+          arrow.setAttribute('x2', MX(s.to.x));   arrow.setAttribute('y2', MY(s.to.y));
+          arrow.setAttribute('stroke', s.color === 'A' ? C.accent : C.accent2);
+          arrow.setAttribute('marker-end', s.color === 'A' ? 'url(#dz-emb-arrA)' : 'url(#dz-emb-arrB)');
+          arrow.setAttribute('opacity', .95);
+          if (k === 2) {
+            /* 显示第一步的虚线残影，帮助看到「位移被平移过来」 */
+            ghost.setAttribute('x1', MX(2)); ghost.setAttribute('y1', MY(5));
+            ghost.setAttribute('x2', MX(0)); ghost.setAttribute('y2', MY(5));
+            ghost.setAttribute('opacity', .5);
+          }
+        }
+        status.textContent = s.text;
+      }
+
+      function stopPlay() {
+        playing = false;
+        if (timer) { clearInterval(timer); timer = null; }
+        var pb = qs('#dz-emb-play');
+        if (pb) { pb.textContent = '▶ 播放'; pb.classList.remove('on'); }
+      }
+      function reset() {
+        stopPlay(); cur = -1; renderStep(-1);
+      }
+      function stepFwd() {
+        cur = (cur + 1) % STEPS.length;
+        renderStep(cur);
+      }
+      qs('#dz-emb-step').addEventListener('click', function () { stopPlay(); stepFwd(); });
+      qs('#dz-emb-reset').addEventListener('click', reset);
+      qs('#dz-emb-play').addEventListener('click', function () {
+        if (playing) { stopPlay(); return; }
+        playing = true;
+        var pb = qs('#dz-emb-play');
+        pb.textContent = '⏸ 暂停'; pb.classList.add('on');
+        stepFwd();
+        timer = setInterval(function () {
+          if (cur >= STEPS.length - 1) { stopPlay(); return; }
+          stepFwd();
+        }, 1600);
+      });
+      renderStep(-1);
+    } catch (err) {
+      if (ROOT) {
+        ROOT.innerHTML = '<div class="dz-err">demo-embedding 初始化失败：' +
+          String(err && err.message ? err.message : err) + '</div>';
+      }
+    }
+  })();
+  </script>
+</div>

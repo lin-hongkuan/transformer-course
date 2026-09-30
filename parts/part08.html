@@ -1,0 +1,604 @@
+<section class="chapter" id="ch08">
+  <header class="ch-head">
+    <p class="ch-eyebrow">第 8 章 · 推理与解码策略</p>
+    <h2>训练好的模型，是怎么"一个词一个词"说话的？</h2>
+    <p class="ch-lede">前面七章我们把 Transformer 训练好了。但模型本身只会做一件事：给定一段文字，输出"下一个词的概率分布"。它并不会一次性吐出整句话。本章回答两个问题：模型怎么把这个分布变成一段连贯的话（解码策略），以及怎样让这个逐词生成的过程足够快（KV Cache）。学完后，你会理解为什么同一个模型有时回答死板、有时天马行空，以及大模型服务里 prefill 和 decode 两个阶段分别在干什么。</p>
+  </header>
+
+  <h3><span class="sec-no">8.1</span> 自回归生成：把模型的输出再喂回给它自己</h3>
+
+  <p>回忆一下<a href="#ch01" class="xref">第 1 章</a>：语言模型的全部本领可以浓缩成一个函数——给定前面已有的词序列，输出词表上每一个词作为"下一个词"的概率。比如词表有 30522 个词（BERT base 的词表大小），模型每次输出的就是一个 30522 维的概率分布，所有数字加起来等于 1。</p>
+
+  <p>但一段话往往有几十上百个词，模型一次只预测一个，怎么办？答案朴素得可爱：<mark>把刚生成的词接在输入后面，再问一次模型</mark>。这样循环往复，直到模型生成一个特殊的"结束符"。这个过程叫<strong>自回归生成（autoregressive generation）</strong>——"auto"（自己）加 "regressive"（回归），意思是"用自己的输出作为自己的下一步输入"。</p>
+
+  <p>为了让这个循环有明确的起点和终点，我们引入两个特殊符号：</p>
+  <ul>
+    <li><code>&lt;s&gt;</code>：起始符（beginning of sentence），所有生成的"第一颗多米诺骨牌"。</li>
+    <li><code>&lt;/s&gt;</code>：结束符（end of sentence），模型一旦生成它，循环就停止。</li>
+  </ul>
+
+  <h4>三步完整走查：从 &lt;s&gt; 到 "I love you"</h4>
+
+  <p>假设我们已经有一个训练好的模型，想让它从 <code>&lt;s&gt;</code> 开始自由生成一句话。下面是逐词的三步走查。每一步的概率分布都是教学示意数字（真实词表有上万个词，这里只列出概率最高的几个，剩下的合并为"其他"）：</p>
+
+  <p><strong>第 1 步</strong>：输入只有 <code>&lt;s&gt;</code> 一个词。模型输出分布：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>候选词</th><th>I</th><th>The</th><th>We</th><th>It</th><th>其他词合计</th></tr></thead>
+      <tbody>
+        <tr><td>概率</td><td>0.35</td><td>0.25</td><td>0.15</td><td>0.10</td><td>0.15</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>假设这一步选中了 "I"（具体怎么选，正是本章后半部分的主题）。现在序列变成 <code>&lt;s&gt; I</code>。</p>
+
+  <p><strong>第 2 步</strong>：把 <code>&lt;s&gt; I</code> 这整个序列喂回模型。请特别注意：<mark>模型本身没有记忆</mark>，它不会记得"上一轮发生了什么"，它看到的永远是当前这份完整的序列，然后只对最后一个位置做预测。模型输出：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>候选词</th><th>love</th><th>am</th><th>like</th><th>have</th><th>其他词合计</th></tr></thead>
+      <tbody>
+        <tr><td>概率</td><td>0.40</td><td>0.20</td><td>0.15</td><td>0.10</td><td>0.15</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>假设选中了 "love"。序列变成 <code>&lt;s&gt; I love</code>。</p>
+
+  <p><strong>第 3 步</strong>：把 <code>&lt;s&gt; I love</code> 喂回模型，输出：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>候选词</th><th>you</th><th>her</th><th>it</th><th>&lt;/s&gt;</th><th>其他词合计</th></tr></thead>
+      <tbody>
+        <tr><td>概率</td><td>0.50</td><td>0.15</td><td>0.10</td><td>0.05</td><td>0.20</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>选中 "you"，序列变成 <code>&lt;s&gt; I love you</code>。第 4 步再把整个序列喂回去，如果这次模型给 <code>&lt;/s&gt;</code> 的概率最高并被选中，生成结束，最终得到句子 "I love you"。</p>
+
+  <div class="callout callout-info">
+    <p class="callout-title">一句话记住自回归</p>
+    <p>模型每做一次前向传播，只产出一个词；把这个词拼到输入末尾，再做下一次前向传播。生成 n 个词，就要跑 n 次前向传播。<strong>这就是为什么大模型"打字"是一个词一个词蹦出来的</strong>——你在聊天界面里看到的流式输出，正是这个循环的实况直播。</p>
+  </div>
+
+  <figure class="fig">
+    <svg viewBox="0 0 760 300" role="img" aria-label="自回归逐词生成时间线">
+      <defs>
+        <marker id="arr-08a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--muted)"></path>
+        </marker>
+      </defs>
+      <text x="20" y="28" font-size="15" fill="var(--ink)" font-family="inherit">自回归生成时间线：每一步都把完整序列重新喂给模型</text>
+
+      <!-- 第 1 步 -->
+      <rect x="20" y="50" width="70" height="34" rx="6" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="55" y="72" font-size="13" fill="var(--ink)" text-anchor="middle" font-family="inherit">&lt;s&gt;</text>
+      <line x1="92" y1="67" x2="128" y2="67" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-08a)"></line>
+      <rect x="130" y="50" width="90" height="34" rx="6" fill="var(--accent)"></rect>
+      <text x="175" y="72" font-size="13" fill="var(--paper2)" text-anchor="middle" font-family="inherit">模型</text>
+      <line x1="222" y1="67" x2="258" y2="67" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-08a)"></line>
+      <rect x="260" y="50" width="70" height="34" rx="6" fill="var(--paper2)" stroke="var(--accent2)"></rect>
+      <text x="295" y="72" font-size="13" fill="var(--ink)" text-anchor="middle" font-family="inherit">I (0.35)</text>
+      <text x="20" y="108" font-size="12" fill="var(--muted)" font-family="inherit">第 1 步：输入只有起始符，输出选 "I"</text>
+
+      <!-- 回喂箭头 1 -->
+      <path d="M 295 84 C 295 118, 55 118, 55 132" stroke="var(--accent2)" stroke-width="1.5" fill="none" marker-end="url(#arr-08a)"></path>
+      <text x="360" y="122" font-size="12" fill="var(--accent2)" font-family="inherit">把输出接回输入末尾</text>
+
+      <!-- 第 2 步 -->
+      <rect x="20" y="134" width="70" height="34" rx="6" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="55" y="156" font-size="13" fill="var(--ink)" text-anchor="middle" font-family="inherit">&lt;s&gt;</text>
+      <rect x="92" y="134" width="50" height="34" rx="6" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="117" y="156" font-size="13" fill="var(--ink)" text-anchor="middle" font-family="inherit">I</text>
+      <line x1="146" y1="151" x2="182" y2="151" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-08a)"></line>
+      <rect x="184" y="134" width="90" height="34" rx="6" fill="var(--accent)"></rect>
+      <text x="229" y="156" font-size="13" fill="var(--paper2)" text-anchor="middle" font-family="inherit">模型</text>
+      <line x1="276" y1="151" x2="312" y2="151" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-08a)"></line>
+      <rect x="314" y="134" width="90" height="34" rx="6" fill="var(--paper2)" stroke="var(--accent2)"></rect>
+      <text x="359" y="156" font-size="13" fill="var(--ink)" text-anchor="middle" font-family="inherit">love (0.40)</text>
+      <text x="20" y="192" font-size="12" fill="var(--muted)" font-family="inherit">第 2 步：输入 &lt;s&gt; I，输出选 "love"</text>
+
+      <!-- 回喂箭头 2 -->
+      <path d="M 359 168 C 359 202, 55 202, 55 216" stroke="var(--accent2)" stroke-width="1.5" fill="none" marker-end="url(#arr-08a)"></path>
+
+      <!-- 第 3 步 -->
+      <rect x="20" y="218" width="60" height="34" rx="6" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="50" y="240" font-size="13" fill="var(--ink)" text-anchor="middle" font-family="inherit">&lt;s&gt;</text>
+      <rect x="82" y="218" width="40" height="34" rx="6" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="102" y="240" font-size="13" fill="var(--ink)" text-anchor="middle" font-family="inherit">I</text>
+      <rect x="124" y="218" width="52" height="34" rx="6" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="150" y="240" font-size="13" fill="var(--ink)" text-anchor="middle" font-family="inherit">love</text>
+      <line x1="180" y1="235" x2="216" y2="235" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-08a)"></line>
+      <rect x="218" y="218" width="90" height="34" rx="6" fill="var(--accent)"></rect>
+      <text x="263" y="240" font-size="13" fill="var(--paper2)" text-anchor="middle" font-family="inherit">模型</text>
+      <line x1="310" y1="235" x2="346" y2="235" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-08a)"></line>
+      <rect x="348" y="218" width="86" height="34" rx="6" fill="var(--paper2)" stroke="var(--accent2)"></rect>
+      <text x="391" y="240" font-size="13" fill="var(--ink)" text-anchor="middle" font-family="inherit">you (0.50)</text>
+      <text x="20" y="276" font-size="12" fill="var(--muted)" font-family="inherit">第 3 步：输入 &lt;s&gt; I love，输出选 "you"。下一步若输出 &lt;/s&gt; 则停止。</text>
+
+      <!-- 循环标注 -->
+      <rect x="500" y="120" width="240" height="110" rx="10" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="620" y="146" font-size="13" fill="var(--ink)" text-anchor="middle" font-family="inherit">循环要点</text>
+      <text x="620" y="170" font-size="12" fill="var(--muted)" text-anchor="middle" font-family="inherit">模型无记忆：每次看完整序列</text>
+      <text x="620" y="192" font-size="12" fill="var(--muted)" text-anchor="middle" font-family="inherit">每步只产出 1 个词</text>
+      <text x="620" y="214" font-size="12" fill="var(--muted)" text-anchor="middle" font-family="inherit">生成 n 个词 = n 次前向传播</text>
+    </svg>
+    <figcaption>图 8-1　自回归生成时间线。注意每一步的输入都是"目前生成的完整序列"，模型每次只对最后一个位置给出下一个词的分布。</figcaption>
+  </figure>
+
+  <p>现在问题只剩一个：每一步面对一个概率分布，<strong>到底选哪个词？</strong>这就是"解码策略（decoding strategy）"要回答的问题。下面逐一介绍四种主流做法。先用一张总览表把它们的"性格"立起来，后面每节再展开：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>策略</th><th>一句话概括</th><th>有随机性？</th></tr></thead>
+      <tbody>
+        <tr><td>贪心解码</td><td>每步都挑概率最大的词</td><td>否</td></tr>
+        <tr><td>束搜索</td><td>同时追踪 k 条最优路径，最后再定夺</td><td>否</td></tr>
+        <tr><td>温度采样</td><td>先给分布"调温"，再按概率抽奖</td><td>是</td></tr>
+        <tr><td>top-k / top-p</td><td>先把不可能的词筛掉，再在剩下的里面抽</td><td>是</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>还有一个贯穿全章的观察视角：<strong>每一步的决策影响的是"整句话"</strong>。句子的概率是各步概率的连乘，所以"这一步选概率最大的词"和"整句话概率最大"是两回事。记住这一点，贪心与束搜索的分歧就顺理成章了。</p>
+
+  <h4>训练与推理的差别：教师强制回顾</h4>
+
+  <p>顺便呼应<a href="#ch07" class="xref">第 7 章</a>：训练时我们用教师强制（teacher forcing）——不管模型上一步预测得对不对，下一步的输入永远是"标准答案"，所以整个序列可以<strong>并行</strong>一次算完。推理时没有标准答案可用，只能拿模型自己的输出当输入，只能<strong>串行</strong>一个词一个词来。同一个模型、同一套矩阵，训练和推理是两种完全不同的节奏：训练像"对着标准答案批改整张卷子"，推理像"蒙着眼睛一格一格走迷宫"。这也是为什么推理天生比训练"磨人"。</p>
+
+  <h3><span class="sec-no">8.2</span> 贪心解码：每步都选概率最大的那个词</h3>
+
+  <p>最直觉的策略：每一步都选概率最高的词。这叫<strong>贪心解码（greedy decoding）</strong>。上面的走查里我们其实一直在"贪心"——每一步都挑了表格里概率最大的词。</p>
+
+  <p>贪心的好处显而易见：</p>
+  <ul>
+    <li><strong>简单</strong>：不用任何额外机制，取个最大值就行。</li>
+    <li><strong>快</strong>：每步只看一个分布，不做额外搜索。</li>
+    <li><strong>确定性</strong>：同样的输入永远得到同样的输出，方便调试和复现。</li>
+  </ul>
+
+  <h4>贪心的致命伤：每一步最优 ≠ 整体最优</h4>
+
+  <p>贪心的问题可以用一个生活类比讲清楚：爬山时如果每一步都只朝"脚下最陡的上坡方向"走，你很可能会被困在一个小土坡顶上，而错过旁边真正的山峰。这叫<mark>局部最优（local optimum）</mark>——每一步看起来都对，合起来却不是最好的路。</p>
+
+  <p>来看一个"贪心选错"的具体小例子。假设真实的概率分布如下（教学数字）：</p>
+
+  <p><strong>第 1 步</strong>（输入 <code>&lt;s&gt;</code>）：</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>候选词</th><th>"好"</th><th>"太"</th></tr></thead>
+      <tbody>
+        <tr><td>概率</td><td>0.6</td><td>0.4</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>贪心选 "好"（0.6 &gt; 0.4）。</p>
+
+  <p><strong>第 2 步</strong>：两个分支各自的分布是——</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>前缀</th><th>候选词</th><th>概率</th></tr></thead>
+      <tbody>
+        <tr><td>&lt;s&gt; 好</td><td>"难"</td><td>0.5</td></tr>
+        <tr><td>&lt;s&gt; 好</td><td>"冷"</td><td>0.5</td></tr>
+        <tr><td>&lt;s&gt; 太</td><td>"棒"</td><td>0.95</td></tr>
+        <tr><td>&lt;s&gt; 太</td><td>"冷"</td><td>0.05</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>算一下两句话的<strong>联合概率</strong>（把每步概率连乘）：</p>
+  <ul>
+    <li>贪心路径："好 难" 的概率 = 0.6 × 0.5 = <strong>0.30</strong>；就算第二步选最好的分支，"好"开头的句子最多也只有 0.6 × 0.5 = 0.30。</li>
+    <li>被放弃的路径："太 棒" 的概率 = 0.4 × 0.95 = <strong>0.38</strong>。</li>
+  </ul>
+
+  <p>看到了吗？整句概率最高的其实是 "太 棒"（0.38），但贪心在第 1 步就把 "太" 扔掉了，因为那一刻它只看见 0.4 &lt; 0.6，看不见后面藏着的 0.95。<strong>贪心只优化"下一个词"，不优化"整句话"。</strong></p>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">误区警示：概率最高的词 ≠ 概率最高的句子</p>
+    <p>整句概率是各步概率的<strong>连乘</strong>。一个开头概率稍低的词，后面可能接上概率极高的续写，乘起来反而更大。贪心解码在第 1 步就永久关上了这些门，再也回不了头。</p>
+  </div>
+
+  <p>此外，在开放性生成任务（聊天、写故事）里，贪心还有一个体验上的问题：<strong>输出死板、爱重复</strong>。因为分布的"尖子"永远是那几个最常见的词，贪心容易陷入 "I'm sorry, I'm sorry, I'm sorry..." 这样的复读循环。这就是为什么聊天产品几乎从不裸用贪心。</p>
+
+  <h3><span class="sec-no">8.3</span> 束搜索（Beam Search）：一次保留好几条候选路径</h3>
+
+  <p>既然贪心的病根是"第 1 步就把门焊死了"，自然的补救就是：<mark>每一步不只保留 1 条路径，而是保留累计得分最高的 k 条</mark>。这个 k 叫<strong>束宽（beam width / beam size）</strong>。k=1 时退化成贪心；k 越大，搜索越充分，但计算量也越大。</p>
+
+  <h4>为什么用 log 概率？</h4>
+
+  <p>整句概率是连乘：p₁ × p₂ × p₃ × … 一堆小于 1 的数乘起来会迅速变得极小（0.5¹⁰⁰ ≈ 10⁻³⁰），计算机浮点数根本存不下。解决办法是取对数——直觉一句话：<strong>取对数把"连乘"变成"连加"</strong>，因为 log(a × b) = log a + log b。于是：</p>
+
+  <div class="formula">
+    整句得分 = Σ log p<sub>t</sub>　（每个生成词的 log 概率相加）
+  </div>
+
+  <p>注意 log 概率都是负数（概率 &lt; 1，对数为负），所以"得分最高"意味着"最接近 0"，即负得最少。比如 log(0.6) ≈ −0.51，log(0.4) ≈ −0.92。下面手算全程使用 log 概率相加。</p>
+
+  <h4>beam = 2 的完整手算走查（3 步）</h4>
+
+  <p>假设词表里我们关心的候选词每步只列前几个，<strong>束宽 k = 2</strong>，即每一步结束只保留累计得分最高的 2 条路径。</p>
+
+  <p><strong>第 1 步</strong>：从 <code>&lt;s&gt;</code> 出发，模型给出分布。候选与 log 概率：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>候选词</th><th>p</th><th>log p</th><th>累计得分</th><th>去留</th></tr></thead>
+      <tbody>
+        <tr><td>好</td><td>0.6</td><td>−0.51</td><td>−0.51</td><td>保留 ✅</td></tr>
+        <tr><td>太</td><td>0.4</td><td>−0.92</td><td>−0.92</td><td>保留 ✅</td></tr>
+        <tr><td>真</td><td>0.3</td><td>−1.20</td><td>−1.20</td><td>淘汰 ❌</td></tr>
+        <tr><td>很</td><td>0.2</td><td>−1.61</td><td>−1.61</td><td>淘汰 ❌</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>第 1 步只有 1 条路径展开，词表候选按得分排序后取前 2：留下 "好" 和 "太" 两条路径。（注意：贪心在这里已经丢掉了 "太"，束搜索保住了它。）</p>
+
+  <p><strong>第 2 步</strong>：现在手里有 2 条活路径，每条都要展开。模型分别对 "&lt;s&gt; 好" 和 "&lt;s&gt; 太" 各预测一个分布，产生 2 × 候选数个新路径。逐个计算累计得分：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>路径</th><th>本步词</th><th>本步 log p</th><th>累计得分</th><th>去留</th></tr></thead>
+      <tbody>
+        <tr><td>好</td><td>难</td><td>log 0.5 = −0.69</td><td>−0.51 − 0.69 = −1.20</td><td>候选</td></tr>
+        <tr><td>好</td><td>冷</td><td>log 0.5 = −0.69</td><td>−0.51 − 0.69 = −1.20</td><td>候选</td></tr>
+        <tr><td>好</td><td>累</td><td>log 0.3 = −1.20</td><td>−0.51 − 1.20 = −1.71</td><td>淘汰 ❌</td></tr>
+        <tr><td>太</td><td>棒</td><td>log 0.95 = −0.05</td><td>−0.92 − 0.05 = <strong>−0.97</strong></td><td>保留 ✅</td></tr>
+        <tr><td>太</td><td>冷</td><td>log 0.05 = −3.00</td><td>−0.92 − 3.00 = −3.92</td><td>淘汰 ❌</td></tr>
+        <tr><td>太</td><td>贵</td><td>log 0.2 = −1.61</td><td>−0.92 − 1.61 = −2.53</td><td>淘汰 ❌</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>按累计得分排序：−0.97（太 棒）&gt; −1.20（好 难）= −1.20（好 冷）。取前 2，保留 "太 棒" 和 "好 难"（同分时任取其一，这里取 "好 难"）。</p>
+
+  <p><mark>关键一幕发生了</mark>：第 1 步领先的 "好"（−0.51）在第 2 步被 "太 棒"（−0.97）反超。束搜索因为留着 "太" 这条后路，成功挖到了贪心错过的金子。</p>
+
+  <p><strong>第 3 步</strong>：再展开这 2 条路径，各取分布：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>路径</th><th>本步词</th><th>本步 log p</th><th>累计得分</th><th>去留</th></tr></thead>
+      <tbody>
+        <tr><td>太 棒</td><td>&lt;/s&gt;</td><td>log 0.8 = −0.22</td><td>−0.97 − 0.22 = <strong>−1.19</strong></td><td>保留 ✅（完成）</td></tr>
+        <tr><td>太 棒</td><td>了</td><td>log 0.15 = −1.90</td><td>−0.97 − 1.90 = −2.87</td><td>淘汰 ❌</td></tr>
+        <tr><td>好 难</td><td>&lt;/s&gt;</td><td>log 0.4 = −0.92</td><td>−1.20 − 0.92 = −2.12</td><td>保留 ✅（完成）</td></tr>
+        <tr><td>好 难</td><td>学</td><td>log 0.5 = −0.69</td><td>−1.20 − 0.69 = −1.89</td><td>淘汰 ❌</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>两条路径都以 <code>&lt;/s&gt;</code> 结束时，比较最终得分："太 棒"（−1.19）胜过 "好 难"（−2.12），最终输出 <strong>"太 棒"</strong>。对比贪心解码得到的 "好 难"——束搜索找到了整句概率更高的答案，正是我们手算验证过的结论（0.38 &gt; 0.30，对应 log 得分 −0.97 &gt; −1.20）。</p>
+
+  <h4>束宽 k 怎么选？</h4>
+
+  <p>工程上常见的束宽在 2~10 之间。规律是：<strong>收益递减</strong>。从 k=1（贪心）到 k=2 提升最明显，因为第 1 步被误杀的好路径最多；k 再往上加，能找到的更优解越来越少，计算量却线性增长（每步要展开 k 条路径、各跑一次前向）。而且如前面提示框所说，开放性任务里 k 太大反而让输出平庸化。所以"k 越大越好"是错觉，实际系统都在质量和成本之间取一个不大的值。</p>
+
+  <h4>长度归一化：别歧视长句子</h4>
+
+  <p>细心的读者会发现一个 bug：句子越长，乘的概率越多，累计 log 得分越负。这会<strong>系统性地惩罚长句子</strong>，让束搜索偏爱"早点说 &lt;/s&gt;"的短句——哪怕短句其实更差。</p>
+
+  <p>工程上的补救叫<strong>长度归一化（length normalization）</strong>：把累计得分除以句子长度（常用长度为 α 次幂，α 常取 0.6~0.7）：</p>
+
+  <div class="formula">
+    归一化得分 = ( Σ log p<sub>t</sub> ) / n<sup>α</sup>
+  </div>
+
+  <p>一句话直觉：不再比"总分"，改比"平均分"，长句子就不吃亏了。这一节只点到为止——知道有这个问题、有这个补丁即可。</p>
+
+  <div class="callout callout-tip">
+    <p class="callout-title">束搜索用在哪？</p>
+    <p>束搜索适合"有标准答案"的任务：机器翻译、摘要——这些任务里存在一条客观上最好的句子，值得花算力去找。但开放性聊天里束搜索反而会让回答变得平庸、爱复读（因为它总往"最安全的常见句"收敛），所以聊天产品主要用下面要讲的采样方法。</p>
+  </div>
+  <h3><span class="sec-no">8.4</span> 采样方法：给生成加一点"随机性"</h3>
+
+  <p>贪心/束搜索是"确定性"策略：同样的输入永远得到同样的输出。采样（sampling）则反过来：<mark>把概率分布当成抽奖池，按概率随机抽词</mark>——概率 0.5 的词就有一半机会被抽中，概率 0.05 的词也有 5% 的机会偶尔露脸。这样同样的输入每次都能生成不同的话，输出更自然、更有惊喜感。</p>
+
+  <p>但纯按原分布抽有一个问题：词表里几万个词，尾部堆积着大量"不合适但概率不为零"的词（胡言乱语、事实错误、乱码），偶尔也会中奖。所以实际系统都在采样前对分布做"整形"。下面介绍三种主流整形术。</p>
+
+  <h4>温度（Temperature）：调节分布的"尖锐度"</h4>
+
+  <p>先讲直觉。回想<a href="#ch03" class="xref">第 3 章</a>的 softmax：模型的原始输出是一堆分数（logits，可以为任意正负数），softmax 把它们变成概率。温度 T 就是在进 softmax 之前，<strong>把所有 logits 除以 T</strong>：</p>
+
+  <div class="formula">
+    p<sub>i</sub> = exp(z<sub>i</sub> / T) / Σ<sub>j</sub> exp(z<sub>j</sub> / T)
+  </div>
+
+  <p>T 的效果像"心情旋钮"：</p>
+  <ul>
+    <li><strong>T &lt; 1</strong>（低温）：除以一个小于 1 的数，等于把 logits 放大，大者更大、小者更小，分布变得<strong>尖锐</strong>——模型更自信、更保守、更像贪心。T 趋近 0 时几乎等价于贪心。</li>
+    <li><strong>T = 1</strong>：原样不动，就是模型本来的分布。</li>
+    <li><strong>T &gt; 1</strong>（高温）：logits 被压缩，大家彼此接近，分布变得<strong>平坦</strong>——小概率词也能分到更多机会，输出更随机、更有"创造力"，但太热会胡说八道。</li>
+  </ul>
+
+  <p><strong>手算一遍</strong>。假设模型对 4 个候选词给出的 logits 是（真实模型给的就是这种未归一化的分数）：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>候选词</th><th>"晴"</th><th>"雨"</th><th>"雪"</th><th>"雾"</th></tr></thead>
+      <tbody>
+        <tr><td>logit z</td><td>2.0</td><td>1.0</td><td>0.5</td><td>0.0</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><strong>T = 1 时</strong>（标准 softmax）：先算 exp(zᵢ)：e²·⁰ ≈ 7.39，e¹·⁰ ≈ 2.72，e⁰·⁵ ≈ 1.65，e⁰ = 1.00。总和 = 7.39 + 2.72 + 1.65 + 1.00 = 12.76。各自除以 12.76：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>T = 1</th><th>晴</th><th>雨</th><th>雪</th><th>雾</th></tr></thead>
+      <tbody>
+        <tr><td>exp(z/T)</td><td>7.39</td><td>2.72</td><td>1.65</td><td>1.00</td></tr>
+        <tr><td>概率</td><td>0.58</td><td>0.21</td><td>0.13</td><td>0.08</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><strong>T = 0.5 时</strong>（低温）：logits 除以 0.5 等于乘以 2，变成 4.0, 2.0, 1.0, 0.0。再算 exp：e⁴ ≈ 54.6，e² ≈ 7.39，e¹ ≈ 2.72，e⁰ = 1.00，总和 = 65.71：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>T = 0.5</th><th>晴</th><th>雨</th><th>雪</th><th>雾</th></tr></thead>
+      <tbody>
+        <tr><td>exp(z/T)</td><td>54.60</td><td>7.39</td><td>2.72</td><td>1.00</td></tr>
+        <tr><td>概率</td><td>0.83</td><td>0.11</td><td>0.04</td><td>0.02</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>头部词 "晴" 从 0.58 涨到 0.83——分布变尖锐了，采样结果更接近"总是选晴"。</p>
+
+  <p><strong>T = 2.0 时</strong>（高温）：logits 除以 2，变成 1.0, 0.5, 0.25, 0.0。算 exp：e¹ ≈ 2.72，e⁰·⁵ ≈ 1.65，e⁰·²⁵ ≈ 1.28，e⁰ = 1.00，总和 = 6.65：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>T = 2.0</th><th>晴</th><th>雨</th><th>雪</th><th>雾</th></tr></thead>
+      <tbody>
+        <tr><td>exp(z/T)</td><td>2.72</td><td>1.65</td><td>1.28</td><td>1.00</td></tr>
+        <tr><td>概率</td><td>0.41</td><td>0.25</td><td>0.19</td><td>0.15</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>四个词的概率从 0.58/0.21/0.13/0.08 变成 0.41/0.25/0.19/0.15——彼此更接近了，分布变平坦，尾部词 "雾" 的机会从 8% 涨到 15%。</p>
+
+  <div class="callout callout-tip">
+    <p class="callout-title">经验之谈</p>
+    <p>写作、头脑风暴：T 调高一点（0.8~1.2）找惊喜。代码生成、事实问答：T 调低（0.1~0.3）求稳。很多 API 的 temperature 参数就是这个旋钮。</p>
+  </div>
+
+  <h4>Top-k 采样：只留前 k 个候选</h4>
+
+  <p>做法粗暴有效：<strong>每一步只保留概率最高的 k 个词，其余全部砍掉（概率置 0），然后把剩下的概率重新归一化（缩放到和为 1），再采样</strong>。k = 50 是常见设置。</p>
+
+  <p>用刚才的分布举例（T = 1：晴 0.58、雨 0.21、雪 0.13、雾 0.08），设 k = 2：只留 "晴" 和 "雨"，重新归一化：0.58/(0.58+0.21) ≈ 0.73，0.21/0.79 ≈ 0.27。"雪" 和 "雾" 永远不会被选中。</p>
+
+  <p>Top-k 的问题在于 k 是<strong>死的</strong>：分布尖锐时（比如某个词概率 0.98），留 50 个词还是会放进来 49 个凑数的垃圾；分布平坦时（前 100 个词概率都差不多），只留 50 个又砍掉了大量合理选项。一刀切，不合身。</p>
+
+  <h4>Top-p 采样（核采样，Nucleus Sampling）：按"累积概率"动态截断</h4>
+
+  <p>Top-p 换了个思路：不数"留几个词"，而是<mark>从概率最高的词开始往下累加，累积概率刚达到阈值 p 就停，只留这些词</mark>（这组词叫"核"，nucleus），其余砍掉后重新归一化再采样。</p>
+
+  <p>还是刚才的分布，按概率降序：晴 0.58、雨 0.21、雪 0.13、雾 0.08。设 p = 0.9：</p>
+  <ul>
+    <li>加 "晴"：累积 0.58，还没到 0.9，继续；</li>
+    <li>加 "雨"：累积 0.79，还没到，继续；</li>
+    <li>加 "雪"：累积 0.92 ≥ 0.9，停！</li>
+  </ul>
+  <p>核 = {晴， 雨， 雪}，"雾" 被截掉。重新归一化：0.58/0.92 ≈ 0.63，0.21/0.92 ≈ 0.23，0.13/0.92 ≈ 0.14。</p>
+
+  <p>体会一下 top-p 比 top-k 聪明在哪：<strong>候选集合的大小随分布形状自动伸缩</strong>。分布尖锐时（某个词 0.98），核里可能只有 1~2 个词——几乎等于贪心，安全；分布平坦时，核会自动扩到几十上百个词——保留多样性。同一件衣服，胖了瘦了都能穿。这就是为什么 top-p（常配 p = 0.9 或 0.95）成了当前聊天模型的主流默认设置，也常和温度叠加使用（先调温度，再截核）。</p>
+
+  <p>三种采样整形术的对比：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>方法</th><th>整形手法</th><th>候选集合大小</th><th>调什么参数</th></tr></thead>
+      <tbody>
+        <tr><td>温度</td><td>整体拉伸/压缩分布，不删词</td><td>不变（全词表）</td><td>T：0.1（保守）~ 1.5（奔放）</td></tr>
+        <tr><td>top-k</td><td>砍掉排名 k 之后的所有词</td><td>固定为 k</td><td>k：常用 20~50</td></tr>
+        <tr><td>top-p</td><td>砍掉累积概率尾部</td><td>随分布形状伸缩</td><td>p：常用 0.9~0.95</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>实践里三者经常组合：先用温度把分布调到合适的"胖瘦"，再用 top-p 把残余的长尾垃圾截掉。下面的对比总表把纯采样路线和前面的确定性路线放在一起。</p>
+
+  <h4>四种解码策略对比总表</h4>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>策略</th><th>确定性？</th><th>核心做法</th><th>优点</th><th>缺点</th><th>典型场景</th></tr></thead>
+      <tbody>
+        <tr><td>贪心</td><td>是</td><td>每步选 argmax</td><td>最快、可复现</td><td>局部最优、死板易复读</td><td>调试、极简任务</td></tr>
+        <tr><td>束搜索</td><td>是</td><td>保留累计得分前 k 条路径</td><td>逼近全局最优整句</td><td>计算量 ×k、开放任务显平庸</td><td>机器翻译、摘要</td></tr>
+        <tr><td>温度采样</td><td>否</td><td>logits ÷ T 后按分布抽</td><td>一个旋钮连续调随机度</td><td>尾部垃圾仍可能中奖</td><td>聊天、写作（常配 top-p）</td></tr>
+        <tr><td>top-k</td><td>否</td><td>只留前 k 个词再抽</td><td>简单、砍掉长尾</td><td>k 固定、不合身</td><td>早期生成系统</td></tr>
+        <tr><td>top-p</td><td>否</td><td>累积到 p 截断再抽</td><td>候选数自适应分布形状</td><td>仍有少量随机风险</td><td>聊天模型主流默认</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout callout-info">
+    <p class="callout-title">动手玩一玩</p>
+    <p>下面这个交互实验室内置了一个微型"语言模型"（一本预定义的概率续写表）。用同一句话分别跑贪心、温度采样、top-p 三种模式，重点观察两件事：<strong>贪心每次生成的句子一模一样</strong>；<strong>采样每次都不一样，温度越高越野</strong>。每一步的概率条形图里，被 top-p 截掉的词会标灰——亲眼看看"核"是怎么动态伸缩的。</p>
+  </div>
+
+  <div class="demo-frame" data-demo="demo-decoding">正在加载交互演示…</div>
+  <h3><span class="sec-no">8.5</span> KV Cache：让逐词生成快起来的关键优化</h3>
+
+  <p>回到自回归那个循环：每生成一个词都要把<strong>完整序列</strong>重新跑一遍模型。生成第 100 个词时，前 99 个词已经算过 99 遍了——它们的中间结果有任何变化吗？</p>
+
+  <p>答案是：<mark>没有变化</mark>。回忆<a href="#ch06" class="xref">第 6 章</a>的因果掩码：每个位置只能看见自己和之前的词，看不见未来。所以前 99 个词算出来的 Key 和 Value，在第 100 步、第 1000 步都<strong>一模一样</strong>。重复计算纯属浪费。KV Cache 的思想就是一句话：<strong>把每个词在每层算出的 K、V 存起来，以后直接查，不重新算</strong>。</p>
+
+  <h4>每一步真正需要算什么？</h4>
+
+  <p>先用因果掩码（causal mask，<a href="#ch06" class="xref">第 6 章</a>）把"为什么旧结果不变"说透：注意力里位置 i 只能"看见"位置 ≤ i 的词。给序列追加一个新词，只是给矩阵加了一行一列——旧位置能看见的集合一个都没变，所以它们的 Q、K、V 以及它们之间的注意力分数，一个数字都不用更新。<strong>新增计算只来自新词自己那一行。</strong>这正是缓存合法性的数学根基。</p>
+
+  <p>生成第 t 个词时：</p>
+  <ul>
+    <li>新词自己需要算出 Q、K、V（这是新的，必须算）；</li>
+    <li>新词的 Q 要和<strong>所有之前词</strong>的 K 做点积（算注意力分数）、再对它们的 V 加权求和——这些旧 K、V 全部来自缓存；</li>
+    <li>算完后，把新词的 K、V 也追加进缓存，供下一步使用。</li>
+  </ul>
+
+  <p>所以每一步的计算量只和"新词对旧词的注意力"有关，旧词之间两两的注意力分数不用重算——它们早算过了，而且未来的词也看不见，不会更新。</p>
+
+  <h4>算一笔账：O(n²·L) vs O(n·L)</h4>
+
+  <p>设序列当前长度为 n，模型共 L 层，注意力分数的计算是大头（每个位置对其他位置的点积）。</p>
+
+  <p><strong>无缓存</strong>：每生成一个新词，都要把整层注意力从头算一遍。n 个位置两两计算 → 每层约 n² 次点积，L 层就是 <strong>O(n²·L)</strong>。而这一步只为我们多产出一个词。生成整段 n 个词的总开销更是累加到 O(n³·L) 级别。</p>
+
+  <p><strong>有缓存</strong>：旧词的 K、V 直接查表，只需算新词 1 个位置对 n 个旧位置的注意力 → 每层 n 次点积，L 层就是 <strong>O(n·L)</strong>。</p>
+
+  <p><strong>比值 = n²·L / (n·L) = n</strong>。序列越长，省得越多：</p>
+
+  <div class="cols-2">
+    <div class="big-number">n = 1000<br>快约 1000 倍</div>
+    <div class="big-number">n = 8000<br>快约 8000 倍</div>
+  </div>
+
+  <p>（这是注意力分数这一环节的对比，量级估算；实际加速还受其他算子影响，但方向不变：没有 KV Cache，长文本生成慢到不可用。）</p>
+
+  <p>代价是什么？<strong>显存</strong>。缓存的大小 = 层数 L × 序列长 n × 每层 K/V 的维度 × 2（K 和 V 两份）。对 GPT-3 量级（96 层、12288 维）的模型，一条几千词的对话，KV Cache 就要占数 GB 显存。这就是为什么推理服务对"上下文长度"收得这么紧——<mark>长上下文贵的不只是计算，更是显存</mark>。</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 760 330" role="img" aria-label="KV cache 缓存复用示意">
+      <defs>
+        <marker id="arr-08b" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--muted)"></path>
+        </marker>
+      </defs>
+      <text x="20" y="26" font-size="15" fill="var(--ink)" font-family="inherit">生成第 4 个词时：旧词的 K/V 全部来自缓存，只有新词做新计算</text>
+
+      <!-- 缓存区 -->
+      <rect x="20" y="44" width="360" height="120" rx="10" fill="var(--paper2)" stroke="var(--accent3)"></rect>
+      <text x="200" y="66" font-size="13" fill="var(--accent3)" text-anchor="middle" font-family="inherit">KV Cache（每层一份，此处画 1 层示意）</text>
+      <g font-size="12" font-family="inherit">
+        <rect x="36" y="78" width="76" height="30" rx="5" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="74" y="97" text-anchor="middle" fill="var(--ink)">K₁ V₁ (&lt;s&gt;)</text>
+        <rect x="120" y="78" width="76" height="30" rx="5" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="158" y="97" text-anchor="middle" fill="var(--ink)">K₂ V₂ (I)</text>
+        <rect x="204" y="78" width="76" height="30" rx="5" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="242" y="97" text-anchor="middle" fill="var(--ink)">K₃ V₃ (love)</text>
+        <rect x="288" y="78" width="76" height="30" rx="5" fill="var(--paper2)" stroke="var(--accent2)"></rect>
+        <text x="326" y="97" text-anchor="middle" fill="var(--ink)">K₄ V₄ (you)</text>
+        <text x="200" y="132" text-anchor="middle" fill="var(--muted)">前 3 组是历史缓存，直接复用；第 4 组本步新算后追加</text>
+      </g>
+
+      <!-- 新词 -->
+      <rect x="440" y="70" width="110" height="52" rx="8" fill="var(--accent)"></rect>
+      <text x="495" y="92" font-size="13" fill="var(--paper2)" text-anchor="middle" font-family="inherit">新词 "you"</text>
+      <text x="495" y="110" font-size="11" fill="var(--paper2)" text-anchor="middle" font-family="inherit">只算 Q₄ K₄ V₄</text>
+
+      <!-- 箭头：缓存读出 -->
+      <line x1="120" y1="120" x2="300" y2="196" stroke="var(--accent3)" stroke-width="1.5" marker-end="url(#arr-08b)"></line>
+      <line x1="242" y1="120" x2="330" y2="196" stroke="var(--accent3)" stroke-width="1.5" marker-end="url(#arr-08b)"></line>
+      <text x="120" y="180" font-size="12" fill="var(--accent3)" font-family="inherit">读出旧 K（与 Q₄ 点积算分数）</text>
+      <text x="120" y="198" font-size="12" fill="var(--accent3)" font-family="inherit">读出旧 V（按分数加权求和）</text>
+
+      <!-- 注意力计算 -->
+      <rect x="290" y="200" width="180" height="56" rx="8" fill="var(--paper2)" stroke="var(--accent)"></rect>
+      <text x="380" y="222" font-size="13" fill="var(--ink)" text-anchor="middle" font-family="inherit">注意力：Q₄ × K₁..₄</text>
+      <text x="380" y="242" font-size="12" fill="var(--muted)" text-anchor="middle" font-family="inherit">softmax 后加权 V₁..₄</text>
+      <line x1="495" y1="122" x2="420" y2="198" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-08b)"></line>
+
+      <!-- 输出 -->
+      <line x1="470" y1="228" x2="520" y2="228" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-08b)"></line>
+      <rect x="524" y="200" width="140" height="56" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="594" y="222" font-size="13" fill="var(--ink)" text-anchor="middle" font-family="inherit">输出分布</text>
+      <text x="594" y="242" font-size="12" fill="var(--muted)" text-anchor="middle" font-family="inherit">选出下一个词</text>
+
+      <!-- 旧词不重算标注 -->
+      <rect x="20" y="200" width="240" height="56" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="140" y="222" font-size="13" fill="var(--ink)" text-anchor="middle" font-family="inherit">旧词 K/V 不再重算</text>
+      <text x="140" y="242" font-size="12" fill="var(--muted)" text-anchor="middle" font-family="inherit">因果掩码保证它们永远不变</text>
+
+      <!-- 底部公式条 -->
+      <rect x="20" y="280" width="720" height="38" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="380" y="304" font-size="13" fill="var(--ink)" text-anchor="middle" font-family="inherit">无缓存每层 O(n²) 次点积　→　有缓存每层 O(n) 次点积：省 n 倍，序列越长省得越多</text>
+    </svg>
+    <figcaption>图 8-2　KV Cache 示意。生成新词时只对它自己做 Q/K/V 计算，历史词的 K、V 从缓存读取。注意缓存按层保存——L 层模型有 L 份这样的缓存。</figcaption>
+  </figure>
+
+  <h4>Prefill 与 Decode：一次推理的两个阶段</h4>
+
+  <p>有了 KV Cache，一次完整的生成自然分成两个阶段，你现在打开任何大模型服务，背后都是这两步：</p>
+
+  <p><strong>阶段一：Prefill（预填充）</strong>。把你输入的提示词（prompt）<strong>一次性并行</strong>喂给模型——提示词是现成的，所有位置可以同时算（这就是 Transformer 相对 RNN 的并行优势，见<a href="#ch01" class="xref">第 1 章</a>）。这一阶段的产出有两个：每个位置的 K、V 全部入缓存；最后一个位置给出第一个生成词的分布。特点：<strong>计算密集</strong>（矩阵又大又满），但只做一次。</p>
+
+  <p><strong>阶段二：Decode（逐词解码）</strong>。从缓存出发，一个词一个词地生成：每步只处理 1 个新词，读缓存、算注意力、采样、追加缓存。特点：每步计算量小，但<strong>显存带宽密集</strong>——每步都要把整个模型权重和全部 KV Cache 从显存搬一遍，瓶颈在"搬运"而不在"算"。这就是为什么聊天时首字延迟（等 prefill）和后续打字速度（decode 节奏）由两套不同的硬件瓶颈决定。</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>对比项</th><th>Prefill 阶段</th><th>Decode 阶段</th></tr></thead>
+      <tbody>
+        <tr><td>输入</td><td>完整提示词（n 个词）</td><td>每步 1 个新词</td></tr>
+        <tr><td>并行度</td><td>高：n 个位置同时算</td><td>低：串行，一次 1 个词</td></tr>
+        <tr><td>执行次数</td><td>1 次</td><td>每个生成词 1 次</td></tr>
+        <tr><td>瓶颈</td><td>计算量（FLOPs）</td><td>显存带宽</td></tr>
+        <tr><td>用户感知</td><td>首字延迟</td><td>打字速度</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">常见误区：KV Cache 会改变模型输出吗？</p>
+    <p>不会。KV Cache 是纯粹的"省掉重复计算"，数学上和"每步重算全部"完全等价（忽略浮点舍入的微小差异）。它不改变任何一个概率值，只改变到达结果的速度。</p>
+  </div>
+
+  <div class="callout callout-tip">
+    <p class="callout-title">为什么聊天时"第一个字慢，后面顺"？</p>
+    <p>第一个词要等 prefill：整个提示词（你的问题 + 系统提示，可能几千词）并行跑一次大矩阵运算。之后每个词只是 decode 的一小步，瓶颈在把权重和缓存从显存搬进计算单元，速度由带宽决定。所以提示词越长，首字越慢；回答越长，越依赖 decode 的"搬运速度"。你在产品上看到的"首 token 延迟"和"tokens/s"两个指标，对应的正是这两个阶段。</p>
+  </div>
+
+  <h4>KV Cache 与多头注意力、层数的关系</h4>
+
+  <p>缓存是<strong>每层、每个头</strong>都要存一份的。以原论文的 base 模型为例：L = 6 层（只算解码器侧），h = 8 头，每头 d_k = d_v = 64 维。每缓存一个词的 K 和 V，需要存 6 × 8 × (64 + 64) = 6144 个浮点数。对话跑到 4000 词，就是约 2500 万个浮点数——按 FP16 两个字节算约 50 MB，单看不大，但推理服务要同时服务几百上千条对话，缓存总量立刻变成显存大户。这也是现代变体里 GQA（分组查询注意力，见<a href="#ch09" class="xref">第 9 章</a>）让多个头共享一份 K/V 的动机：直接给缓存减肥。</p>
+
+  <h3><span class="sec-no">8.6</span> 本章全景：从分布到一句话，一张路线图</h3>
+
+  <p>把全章串成一条流水线：模型输出 logits →（可选）温度整形 →（可选）top-k / top-p 截断 → 贪心取最大值或按分布采样 → 得到一个词 → 词拼回输入、K/V 入缓存 → 循环直到 <code>&lt;/s&gt;</code>。其中 prefill 负责吃下你的提示词并灌满缓存，decode 负责在这个循环里逐词推进。解码策略决定"说什么风格的话"，KV Cache 决定"说得有多快"。</p>
+
+  <h3><span class="sec-no">8.7</span> 小结</h3>
+  <ul>
+    <li>自回归生成 = 循环"预测下一个词 → 拼回输入 → 再预测"，生成 n 个词需要 n 次前向传播，直到模型输出 <code>&lt;/s&gt;</code>。</li>
+    <li>贪心解码每步取 argmax，简单确定，但会因"每步最优 ≠ 整体最优"陷入局部最优，且开放任务中死板易复读。</li>
+    <li>束搜索每步保留累计 log 概率最高的 k 条路径，能找到整句更优的结果；用 log 把连乘变连加防下溢；用长度归一化避免惩罚长句。</li>
+    <li>采样引入随机性：温度 T 调分布尖锐度（T&lt;1 尖锐保守、T&gt;1 平坦发散）；top-k 固定留前 k 个；top-p 按累积概率动态截断，候选数自适应，是聊天模型主流。</li>
+    <li>KV Cache 缓存每层每词的 K、V，把每步注意力从 O(n²·L) 降到 O(n·L)，序列越长省得越多；代价是显存。推理因此分 prefill（并行吃提示词，计算密集）和 decode（串行逐词，带宽密集）两阶段。</li>
+  </ul>
+
+  <h3><span class="sec-no">8.8</span> 常见误区</h3>
+  <div class="callout callout-warn">
+    <p class="callout-title">四个高频错误认识</p>
+    <ul>
+      <li><strong>"模型会记住对话"</strong>：不会。模型是无状态函数，"记忆"完全靠每步把完整上下文重新喂进去（K、V 被缓存不等于模型有思想）。</li>
+      <li><strong>"beam search 越大越好"</strong>：不是。束宽增大收益递减，且开放性任务中过大的束宽让输出更平庸、更爱复读。</li>
+      <li><strong>"温度调高就是模型变聪明/变笨"</strong>：都不是。温度只在采样阶段整形分布，模型的权重一个数字都没动。</li>
+      <li><strong>"KV Cache 是近似加速"</strong>：不是近似。缓存的结果和重算严格一致（浮点误差除外），它不改变输出，只省时间。</li>
+    </ul>
+  </div>
+
+  <h3><span class="sec-no">8.9</span> 自测题</h3>
+  <details class="quiz">
+    <summary>第 1 题：某步模型给出概率：A=0.5, B=0.3, C=0.15, D=0.05。用 top-p（p=0.85）采样，核里有哪几个词？</summary>
+    <p>按概率降序累加：A（0.5）→ 加 B 后 0.8，未到 0.85 → 加 C 后 0.95 ≥ 0.85，停。核 = {A, B, C}，D 被截掉。随后三者归一化为 0.5/0.95 ≈ 0.526、0.3/0.95 ≈ 0.316、0.15/0.95 ≈ 0.158，再按此采样。</p>
+  </details>
+  <details class="quiz">
+    <summary>第 2 题：为什么束搜索里要加 log 概率而不是直接乘概率？</summary>
+    <p>两个原因。（1）数值稳定：一堆小于 1 的概率连乘会迅速下溢（0.5 的一百次方约 10⁻³⁰），浮点数存不下；log 把连乘变连加，数值范围安全。（2）排序等价：log 是单调递增函数，比较 log 概率之和与比较概率之积，大小顺序完全一致，不影响选哪条路径。</p>
+  </details>
+  <details class="quiz">
+    <summary>第 3 题：序列长度从 2000 涨到 4000，使用 KV Cache 时每步注意力计算量（相对无缓存）节省的倍数怎么变？KV Cache 占的显存怎么变？</summary>
+    <p>节省倍数 ≈ n，所以从约省 2000 倍变成约省 4000 倍（省得更多）。但缓存大小与 n 成正比，显存占用翻倍——这正是"长上下文又香又贵"的原因：越快，越占地方。</p>
+  </details>
+</section>

@@ -1,0 +1,491 @@
+<!-- demo-softmax.html · Softmax 温度实验室（补充演示，可被任意章节复用） -->
+<div class="dz-sm" id="dz-sm-root">
+  <style>
+    .dz-sm { font: inherit; color: var(--ink); }
+    .dz-sm * { box-sizing: border-box; }
+    .dz-sm .dz-panel {
+      border: 1px solid var(--line);
+      background: var(--paper2);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+    }
+    .dz-sm .dz-panel-title {
+      margin: 0 0 10px;
+      font-weight: 700;
+      font-size: .92rem;
+      letter-spacing: .04em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    /* ---- sliders ---- */
+    .dz-sm .dz-slider-row {
+      display: grid;
+      grid-template-columns: minmax(64px, 96px) 1fr minmax(56px, auto);
+      align-items: center;
+      gap: 10px;
+      margin: 6px 0;
+    }
+    .dz-sm .dz-slider-row label {
+      font-size: .88rem;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .dz-sm .dz-slider-row label .dz-sub {
+      display: block;
+      font-weight: 400;
+      font-size: .74rem;
+      color: var(--muted);
+    }
+    .dz-sm .dz-val {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: .85rem;
+      text-align: right;
+      color: var(--accent);
+      min-width: 52px;
+    }
+    .dz-sm .dz-val.dz-val-t { color: var(--accent2); font-weight: 700; }
+    .dz-sm input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 28px;
+      background: transparent;
+      cursor: pointer;
+      touch-action: pan-y;
+    }
+    .dz-sm input[type="range"]::-webkit-slider-runnable-track {
+      height: 6px;
+      border-radius: 3px;
+      background: var(--line);
+    }
+    .dz-sm input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 22px; height: 22px;
+      margin-top: -8px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 3px solid var(--paper2);
+      box-shadow: 0 1px 4px rgba(0,0,0,.25);
+    }
+    .dz-sm input[type="range"].dz-range-t::-webkit-slider-thumb { background: var(--accent2); }
+    .dz-sm input[type="range"]::-moz-range-track {
+      height: 6px; border-radius: 3px; background: var(--line);
+    }
+    .dz-sm input[type="range"]::-moz-range-thumb {
+      width: 18px; height: 18px; border-radius: 50%;
+      background: var(--accent); border: 3px solid var(--paper2);
+      box-shadow: 0 1px 4px rgba(0,0,0,.25);
+    }
+    .dz-sm input[type="range"].dz-range-t::-moz-range-thumb { background: var(--accent2); }
+    /* ---- preset + control buttons ---- */
+    .dz-sm .dz-btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0 2px;
+    }
+    .dz-sm .dz-btn {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--paper2);
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 9px 14px;
+      font-size: .86rem;
+      font-weight: 600;
+      cursor: pointer;
+      min-height: 40px;
+      flex: 1 1 auto;
+      transition: background .15s ease, color .15s ease, border-color .15s ease;
+    }
+    .dz-sm .dz-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .dz-sm .dz-btn:active { transform: translateY(1px); }
+    .dz-sm .dz-btn.dz-btn-accent {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .dz-sm .dz-btn.dz-btn-accent:hover { background: var(--accent-ink); border-color: var(--accent-ink); color: #fff; }
+    /* ---- charts ---- */
+    .dz-sm .dz-charts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 640px) {
+      .dz-sm .dz-charts { grid-template-columns: 1fr; }
+      .dz-sm .dz-slider-row { grid-template-columns: minmax(52px, 72px) 1fr minmax(48px, auto); }
+    }
+    .dz-sm .dz-chart h4 {
+      margin: 0 0 8px;
+      font-size: .85rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .dz-sm .dz-chart h4 .dz-dot {
+      display: inline-block;
+      width: 10px; height: 10px;
+      border-radius: 3px;
+      margin-right: 6px;
+      vertical-align: -1px;
+    }
+    .dz-sm .dz-dot.dz-dot-l { background: var(--accent); }
+    .dz-sm .dz-dot.dz-dot-p { background: var(--accent2); }
+    .dz-sm .dz-bar-row {
+      display: grid;
+      grid-template-columns: 28px 1fr 74px;
+      align-items: center;
+      gap: 8px;
+      margin: 7px 0;
+    }
+    .dz-sm .dz-bar-name {
+      font-size: .8rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-align: center;
+    }
+    .dz-sm .dz-track {
+      position: relative;
+      height: 24px;
+      background: var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .dz-sm .dz-track.dz-track-centered { background: transparent; }
+    .dz-sm .dz-track .dz-mid {
+      position: absolute;
+      left: 50%; top: 0; bottom: 0;
+      width: 1px;
+      background: var(--line);
+    }
+    .dz-sm .dz-fill {
+      position: absolute;
+      top: 3px; bottom: 3px;
+      border-radius: 4px;
+      transition: left .18s ease, width .18s ease;
+    }
+    .dz-sm .dz-fill.dz-fill-l { background: var(--accent); }
+    .dz-sm .dz-fill.dz-fill-p { background: var(--accent2); }
+    .dz-sm .dz-bar-val {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: .78rem;
+      color: var(--ink);
+      text-align: right;
+      white-space: nowrap;
+    }
+    .dz-sm .dz-bar-val .dz-pct { color: var(--accent2); font-weight: 700; }
+    /* ---- entropy ---- */
+    .dz-sm .dz-entropy {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--accent3);
+      background: var(--accent3-soft);
+      border-radius: 10px;
+      padding: 12px 16px;
+    }
+    .dz-sm .dz-entropy-top {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .dz-sm .dz-entropy-label { font-weight: 700; font-size: .92rem; }
+    .dz-sm .dz-entropy-h {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--accent3);
+    }
+    .dz-sm .dz-entropy-max { font-size: .8rem; color: var(--muted); }
+    .dz-sm .dz-entropy-meter {
+      height: 8px;
+      border-radius: 4px;
+      background: var(--line);
+      margin: 10px 0;
+      overflow: hidden;
+    }
+    .dz-sm .dz-entropy-meter i {
+      display: block;
+      height: 100%;
+      background: var(--accent3);
+      border-radius: 4px;
+      transition: width .18s ease;
+    }
+    .dz-sm .dz-entropy-note {
+      margin: 0;
+      font-size: .92rem;
+      line-height: 1.6;
+    }
+    .dz-sm .dz-entropy-note strong { color: var(--accent3); }
+    .dz-sm .dz-err {
+      border: 1px solid var(--accent2);
+      background: var(--accent2-soft);
+      color: var(--ink);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: .9rem;
+    }
+    .dz-sm .dz-formula-hint {
+      margin: 10px 0 0;
+      font-size: .8rem;
+      color: var(--muted);
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      text-align: center;
+    }
+  </style>
+
+  <div class="dz-panel">
+    <p class="dz-panel-title">第一步 · 调节 5 个 logits（模型打分，范围 −5 ~ +5）</p>
+    <div id="dz-sm-sliders"></div>
+    <div class="dz-slider-row" style="margin-top:12px">
+      <label for="dz-sm-temp">温度 T<span class="dz-sub">越小越尖锐</span></label>
+      <input type="range" class="dz-range-t" id="dz-sm-temp" min="0.2" max="3" step="0.05" value="1">
+      <span class="dz-val dz-val-t" id="dz-sm-temp-val">1.00</span>
+    </div>
+    <div class="dz-btn-row">
+      <button type="button" class="dz-btn" data-preset="winner">预设：一个明显赢家</button>
+      <button type="button" class="dz-btn" data-preset="close">预设：全部接近</button>
+      <button type="button" class="dz-btn" data-preset="duel">预设：两个竞争者</button>
+    </div>
+    <div class="dz-btn-row">
+      <button type="button" class="dz-btn dz-btn-accent" id="dz-sm-play">▶ 自动播放：温度 T 往返扫描</button>
+      <button type="button" class="dz-btn" id="dz-sm-step">单步：T −0.1</button>
+      <button type="button" class="dz-btn" id="dz-sm-reset">重置</button>
+    </div>
+  </div>
+
+  <div class="dz-panel">
+    <p class="dz-panel-title">第二步 · 观察：原始打分 vs softmax 之后的概率</p>
+    <div class="dz-charts">
+      <div class="dz-chart">
+        <h4><span class="dz-dot dz-dot-l"></span>原始 logits（打分）</h4>
+        <div id="dz-sm-chart-logits"></div>
+      </div>
+      <div class="dz-chart">
+        <h4><span class="dz-dot dz-dot-p"></span>softmax(logits / T) 概率</h4>
+        <div id="dz-sm-chart-probs"></div>
+      </div>
+    </div>
+    <p class="dz-formula-hint" id="dz-sm-formula">p_i = exp(z_i / T) / Σ_j exp(z_j / T)</p>
+  </div>
+
+  <div class="dz-entropy">
+    <div class="dz-entropy-top">
+      <span class="dz-entropy-label">信息熵 H = −Σ p·log₂p</span>
+      <span class="dz-entropy-h" id="dz-sm-h">—</span>
+      <span class="dz-entropy-max">（5 个选项时，最大 H = log₂5 ≈ 2.32 bit）</span>
+    </div>
+    <div class="dz-entropy-meter"><i id="dz-sm-h-bar" style="width:0%"></i></div>
+    <p class="dz-entropy-note" id="dz-sm-h-note">—</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  try {
+    var root = document.getElementById('dz-sm-root');
+    if (!root) return;
+
+    var N = 5;
+    var NAMES = ['A', 'B', 'C', 'D', 'E'];
+    var state = {
+      logits: [3.0, 1.0, 0.0, -1.0, -2.0],
+      temp: 1.0
+    };
+    var DEFAULTS = { logits: [3.0, 1.0, 0.0, -1.0, -2.0], temp: 1.0 };
+    var PRESETS = {
+      winner: { logits: [4.5, 0.5, 0.0, -0.5, -1.0], temp: 1.0 },
+      close:  { logits: [0.4, 0.2, 0.0, -0.2, -0.4], temp: 1.0 },
+      duel:   { logits: [2.8, 2.6, -0.5, -1.0, -1.5], temp: 1.0 }
+    };
+
+    var slidersBox = root.querySelector('#dz-sm-sliders');
+    var chartLogits = root.querySelector('#dz-sm-chart-logits');
+    var chartProbs = root.querySelector('#dz-sm-chart-probs');
+    var tempSlider = root.querySelector('#dz-sm-temp');
+    var tempVal = root.querySelector('#dz-sm-temp-val');
+    var hOut = root.querySelector('#dz-sm-h');
+    var hBar = root.querySelector('#dz-sm-h-bar');
+    var hNote = root.querySelector('#dz-sm-h-note');
+    var btnPlay = root.querySelector('#dz-sm-play');
+    var btnStep = root.querySelector('#dz-sm-step');
+    var btnReset = root.querySelector('#dz-sm-reset');
+
+    var sliderInputs = [];
+    var sliderVals = [];
+    var logitFills = [], logitVals = [];
+    var probFills = [], probVals = [];
+
+    // ---- build DOM ----
+    for (var i = 0; i < N; i++) {
+      (function (idx) {
+        var row = document.createElement('div');
+        row.className = 'dz-slider-row';
+        var lab = document.createElement('label');
+        lab.setAttribute('for', 'dz-sm-z' + idx);
+        lab.textContent = 'logit ' + NAMES[idx];
+        var inp = document.createElement('input');
+        inp.type = 'range';
+        inp.id = 'dz-sm-z' + idx;
+        inp.min = '-5'; inp.max = '5'; inp.step = '0.1';
+        inp.value = String(state.logits[idx]);
+        var val = document.createElement('span');
+        val.className = 'dz-val';
+        val.textContent = state.logits[idx].toFixed(1);
+        row.appendChild(lab); row.appendChild(inp); row.appendChild(val);
+        slidersBox.appendChild(row);
+        sliderInputs.push(inp); sliderVals.push(val);
+        inp.addEventListener('input', function () {
+          state.logits[idx] = parseFloat(inp.value);
+          render();
+        });
+      })(i);
+
+      // logit bar (centered, can go negative)
+      var lr = document.createElement('div');
+      lr.className = 'dz-bar-row';
+      lr.innerHTML = '<span class="dz-bar-name">' + NAMES[i] + '</span>' +
+        '<div class="dz-track dz-track-centered"><i class="dz-mid"></i><div class="dz-fill dz-fill-l"></div></div>' +
+        '<span class="dz-bar-val"></span>';
+      chartLogits.appendChild(lr);
+      logitFills.push(lr.querySelector('.dz-fill'));
+      logitVals.push(lr.querySelector('.dz-bar-val'));
+
+      // prob bar
+      var pr = document.createElement('div');
+      pr.className = 'dz-bar-row';
+      pr.innerHTML = '<span class="dz-bar-name">' + NAMES[i] + '</span>' +
+        '<div class="dz-track"><div class="dz-fill dz-fill-p"></div></div>' +
+        '<span class="dz-bar-val"><span class="dz-pct"></span></span>';
+      chartProbs.appendChild(pr);
+      probFills.push(pr.querySelector('.dz-fill'));
+      probVals.push(pr.querySelector('.dz-pct'));
+    }
+
+    // ---- math ----
+    function softmax(logits, T) {
+      var m = Math.max.apply(null, logits);
+      var exps = logits.map(function (z) { return Math.exp((z - m) / T); });
+      var s = exps.reduce(function (a, b) { return a + b; }, 0);
+      return exps.map(function (e) { return e / s; });
+    }
+    function entropy(probs) {
+      var H = 0;
+      for (var i = 0; i < probs.length; i++) {
+        var p = probs[i];
+        if (p > 1e-12) H -= p * (Math.log(p) / Math.LN2);
+      }
+      return H;
+    }
+    function explain(H, Hmax) {
+      var r = H / Hmax;
+      if (r < 0.25) return '分布非常尖锐：几乎把所有概率押在一个选项上，模型「非常自信」。';
+      if (r < 0.55) return '分布偏尖锐：有明显的领跑者，但其它选项还留着一点可能。';
+      if (r < 0.85) return '分布比较平：两三个选项难分高下，模型「犹豫不决」。';
+      return '分布接近均匀：每个选项概率都差不多，模型几乎在「随机猜」。';
+    }
+
+    // ---- render ----
+    function render() {
+      var i;
+      for (i = 0; i < N; i++) {
+        var z = state.logits[i];
+        sliderInputs[i].value = String(z);
+        sliderVals[i].textContent = z.toFixed(1);
+        var half = Math.min(Math.abs(z) / 5, 1) * 50;
+        if (z >= 0) {
+          logitFills[i].style.left = '50%';
+          logitFills[i].style.width = half + '%';
+        } else {
+          logitFills[i].style.left = (50 - half) + '%';
+          logitFills[i].style.width = half + '%';
+        }
+        logitVals[i].textContent = z.toFixed(1);
+      }
+      tempSlider.value = String(state.temp);
+      tempVal.textContent = state.temp.toFixed(2);
+
+      var probs = softmax(state.logits, state.temp);
+      for (i = 0; i < N; i++) {
+        probFills[i].style.left = '0%';
+        probFills[i].style.width = (probs[i] * 100).toFixed(2) + '%';
+        probVals[i].textContent = (probs[i] * 100).toFixed(1) + '%';
+      }
+
+      var H = entropy(probs);
+      var Hmax = Math.log(N) / Math.LN2;
+      hOut.textContent = 'H = ' + H.toFixed(2) + ' bit';
+      hBar.style.width = (H / Hmax * 100).toFixed(1) + '%';
+      hNote.innerHTML = '<strong>解读：</strong>' + explain(H, Hmax) +
+        '（温度 T = ' + state.temp.toFixed(2) + '，T 越小分布越尖锐，T 越大越接近均匀。）';
+    }
+
+    // ---- controls ----
+    var playing = false;
+    var timer = null;
+    var playDir = -1;
+    function stopPlay() {
+      playing = false;
+      if (timer) { clearInterval(timer); timer = null; }
+      btnPlay.textContent = '▶ 自动播放：温度 T 往返扫描';
+    }
+    btnPlay.addEventListener('click', function () {
+      if (playing) { stopPlay(); return; }
+      playing = true;
+      btnPlay.textContent = '⏸ 暂停';
+      timer = setInterval(function () {
+        var t = state.temp + playDir * 0.05;
+        if (t <= 0.2) { t = 0.2; playDir = 1; }
+        if (t >= 3.0) { t = 3.0; playDir = -1; }
+        state.temp = Math.round(t * 100) / 100;
+        render();
+      }, 60);
+    });
+    btnStep.addEventListener('click', function () {
+      stopPlay();
+      var t = state.temp - 0.1;
+      if (t < 0.2) t = 3.0;
+      state.temp = Math.round(t * 100) / 100;
+      render();
+    });
+    btnReset.addEventListener('click', function () {
+      stopPlay();
+      state.logits = DEFAULTS.logits.slice();
+      state.temp = DEFAULTS.temp;
+      render();
+    });
+    tempSlider.addEventListener('input', function () {
+      stopPlay();
+      state.temp = parseFloat(tempSlider.value);
+      render();
+    });
+    var presetBtns = root.querySelectorAll('[data-preset]');
+    for (var k = 0; k < presetBtns.length; k++) {
+      (function (btn) {
+        btn.addEventListener('click', function () {
+          stopPlay();
+          var p = PRESETS[btn.getAttribute('data-preset')];
+          state.logits = p.logits.slice();
+          state.temp = p.temp;
+          render();
+        });
+      })(presetBtns[k]);
+    }
+    // stop autoplay when demo leaves the viewport
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(function (entries) {
+        if (!entries[0].isIntersecting) stopPlay();
+      }).observe(root);
+    }
+
+    render();
+  } catch (err) {
+    var root2 = document.getElementById('dz-sm-root');
+    if (root2) {
+      root2.innerHTML = '<div class="dz-err">演示初始化失败：' +
+        String((err && err.message) || err) + '</div>';
+    }
+  }
+})();
+</script>

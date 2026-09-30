@@ -1,0 +1,609 @@
+<!-- part01.html · 第 0 章（序言）+ 第 1 章（为什么需要 Transformer）
+     本章 demo：data-demo="demo-ngram" -->
+
+<section class="chapter" id="ch00">
+  <header class="ch-head">
+    <p class="ch-eyebrow">第 0 章 · 序言</p>
+    <h2>这本书怎么读：写给零基础的你</h2>
+    <p class="ch-lede">这一章不讲任何技术，只做三件事：告诉你这本书的讲法、帮你用一张表自检预备知识、给你一张不迷路的阅读路线图。读完它，你就知道该以什么姿势进入后面的九章。</p>
+  </header>
+
+  <h3><span class="sec-no">0.1</span> 这本书要讲一个什么东西</h3>
+
+  <p>这本书的主角叫 <strong>Transformer</strong>。它是一个 2017 年被提出的神经网络架构，也是今天几乎所有大语言模型——你听说过的 ChatGPT、Claude、Gemini、DeepSeek——共同的"心脏"。</p>
+
+  <p>你可以这样理解它的地位：如果把今天的大语言模型比作一辆汽车，那么 Transformer 就是它的<mark>发动机结构</mark>。不同厂商的车外观、内饰、排量都不一样，但打开发动机盖，里面的基本机械原理是同源的。学会了这台发动机的结构，你再看任何一辆"新车发布会"，都不会只看到热闹，而能看懂门道。</p>
+
+  <p>这本书的目标是：让一个<strong>没有任何深度学习背景的大学生</strong>，读完之后能够：</p>
+
+  <ul>
+    <li>用自己的话向同学解释"注意力机制"在干什么；</li>
+    <li>看着 Transformer 的架构图，说出每一块零件的名字和职责；</li>
+    <li>用纸和笔，把一个 3 个词的小例子从输入算到输出；</li>
+    <li>知道 ChatGPT 这类模型"为什么会说话"，也知道它"为什么会一本正经地胡说八道"。</li>
+  </ul>
+
+  <h3><span class="sec-no">0.2</span> 三条写作约定，帮你读得更快</h3>
+
+  <p>为了让零基础读者不被劝退，全书严格遵守三条约定：</p>
+
+  <p><strong>约定一：先直觉，后公式，再手算。</strong> 每一个数学概念，我们都会先用一个生活类比建立直觉，然后才给出公式，最后一定配一个<mark>用具体小数字完整算一遍</mark>的例子。你不需要"相信"任何公式，你会亲手验证它。</p>
+
+  <p><strong>约定二：数字全部用真实数字。</strong> 书中出现的所有规模数字——比如维度 512、8 个头、6 层编码器——都来自 2017 年原始论文《Attention Is All You Need》的真实配置。我们不编造简化的玩具数字，因为你最终要面对的是真实世界。</p>
+
+  <p><strong>约定三：每一章都配一个可以上手玩的交互演示。</strong> 这些演示不需要安装任何东西，就在网页里运行。读概念觉得抽象的时候，先去玩一玩演示，再回来读文字，会顺很多。</p>
+
+  <div class="callout callout-info">
+    <p class="callout-title">关于"零基础"的诚实声明</p>
+    <p>这里说的"零基础"，指的是<strong>不需要学过机器学习、深度学习</strong>。但你仍然需要一点点数学和编程的直觉，具体是哪些，下面这张自检表会告诉你。它们大多是高中或大一公共课的内容，缺哪补哪，最多花一两天。</p>
+  </div>
+
+  <h3><span class="sec-no">0.3</span> 预备知识自检表</h3>
+
+  <p>请诚实地对照下表检查自己。每一项我们都给出了"自检方法"——你能通过自检，这一项就算过关。没有全部通过<strong>不代表你不能往下读</strong>：本书会在用到它们的地方再做简短复习，但提前补齐会让体验顺畅得多。</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>预备知识</th>
+          <th>需要到什么程度</th>
+          <th>自检方法</th>
+          <th>哪里用得上</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>向量与点积</strong></td>
+          <td>知道向量是一排数字；会算两个向量的点积（对应位置相乘再求和）</td>
+          <td>口算：<code>[1, 2, 3] · [4, 5, 6]</code>。答案应该是 <code>1×4 + 2×5 + 3×6 = 32</code></td>
+          <td>第 3 章注意力分数的全部计算</td>
+        </tr>
+        <tr>
+          <td><strong>矩阵乘法</strong></td>
+          <td>知道"矩阵 × 矩阵"是"行 · 列"的点积；会判断结果矩阵的形状</td>
+          <td>说出 <code>[3×4]</code> 矩阵乘 <code>[4×2]</code> 矩阵，结果是几行几列（答案：<code>[3×2]</code>）</td>
+          <td>第 2、3、4 章的张量形状推导</td>
+        </tr>
+        <tr>
+          <td><strong>概率分布</strong></td>
+          <td>知道一个离散分布就是"一组非负的数、加起来等于 1"</td>
+          <td>判断 <code>{猫: 0.5, 狗: 0.3, 鱼: 0.2}</code> 是不是一个合法分布（是，因为 0.5+0.3+0.2=1）</td>
+          <td>第 1 章语言模型、第 8 章采样解码</td>
+        </tr>
+        <tr>
+          <td><strong>指数函数</strong></td>
+          <td>知道 <code>e^x</code> 增长很快，<code>e^0 = 1</code>，负数指数在 0 和 1 之间</td>
+          <td>不用计算器，把 <code>e^2, e^0, e^-1</code> 按大小排序（答案：<code>e^2 &gt; e^0 &gt; e^-1</code>）</td>
+          <td>第 3 章 softmax 的直觉</td>
+        </tr>
+        <tr>
+          <td><strong>Python 伪代码</strong></td>
+          <td>能读懂 <code>for</code> 循环、字典（dict）、函数定义的伪代码，不要求会写</td>
+          <td>读懂 <code>for w in words: count[w] += 1</code> 在干什么（在数每个词出现几次）</td>
+          <td>第 1 章的 n-gram 例子、全书伪代码</td>
+        </tr>
+        <tr>
+          <td><strong>"训练"的朴素观念</strong></td>
+          <td>只需要生活直觉：模型像学生，做题、对答案、改错，重复很多次就会变好</td>
+          <td>不需要任何计算，认可上面这个比喻即可</td>
+          <td>第 7 章训练过程（届时再严格化）</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>如果前四项你都能通过自检，恭喜你，这本书的数学部分你都能跟上。如果有两三项卡住了，最经济的补课方式是：搜索"3Blue1Brown 线性代数的本质"系列视频的前两集（向量、矩阵乘法），再看任意一篇介绍"softmax 函数"的科普文章，大约半天即可。</p>
+
+  <h3><span class="sec-no">0.4</span> 这本书的讲法：一台机器，拆成零件再装回去</h3>
+
+  <p>很多教程讲 Transformer 的方式是"从论文第一页念到最后一页"。我们不这么做。我们的顺序是<mark>先看整台机器，再一个个拆零件，最后装回去</mark>：</p>
+
+  <ol>
+    <li><strong>第 1 章</strong>先回答"为什么需要它"——看看在它之前的方法（n-gram、RNN）分别卡在哪里。理解了痛点，后面的每个设计你都会恍然大悟："原来这块零件是来解决那个痛点的！"</li>
+    <li><strong>第 2~5 章</strong>逐个拆解零件：词嵌入（把词变成数字）、注意力（零件中的主角）、多头注意力（让主角影分身）、前馈网络与残差连接（配角但缺一不可）。</li>
+    <li><strong>第 6 章</strong>把所有零件装回整机，完整走查一次机器翻译。</li>
+    <li><strong>第 7~8 章</strong>讲这台机器怎么"学会"（训练）、怎么"开口说话"（推理）。</li>
+    <li><strong>第 9 章</strong>把它放回 2017 年之后的演化史里，告诉你 BERT、GPT 和今天的大模型各自改了哪些零件。</li>
+  </ol>
+
+  <div class="callout callout-tip">
+    <p class="callout-title">推荐的阅读姿势</p>
+    <p>第一遍<strong>只读正文和图，跳过所有手算细节</strong>，建立整体地图；第二遍拿起纸笔，跟着手算例子一步一步算。交互演示在两遍之间玩——它既是第一遍的"直觉缓冲垫"，也是第二遍的"验算器"。</p>
+  </div>
+
+  <h3><span class="sec-no">0.5</span> 你会遇到什么符号</h3>
+
+  <p>全书的数学记号只有一条规则需要现在记住：</p>
+
+  <ul>
+    <li><strong>粗体小写字母</strong>表示<mark>向量</mark>（一排数字），例如 <code class="math">x</code> 表示一个词的向量；</li>
+    <li><strong>粗体大写字母</strong>表示<mark>矩阵</mark>（一个数字表格），例如 <code class="math">W</code> 表示一个可学习的参数矩阵；</li>
+    <li>右上角的小 <code class="math">T</code>（如 <code class="math">Kᵀ</code>）表示"转置"——把矩阵的行和列对调，第 3 章会专门讲它为什么出现。</li>
+  </ul>
+
+  <p>遇到任何看不懂的记号，记住一个原则：<strong>它一定在前面某处被定义过</strong>。全书禁止"显然"和"易知"。如果你发现了未经定义就使用的术语，那是这本书的 bug，不是你的问题。</p>
+
+  <h3><span class="sec-no">0.6</span> 小结</h3>
+
+  <ul>
+    <li>Transformer 是 2017 年提出的架构，是今天所有大语言模型共同的"发动机结构"。</li>
+    <li>本书面向零基础：先直觉、再公式、最后手算，数字全部取自原始论文。</li>
+    <li>预备知识只有六小项，核心是向量点积、矩阵乘法、概率分布三样。</li>
+    <li>推荐读法：第一遍建地图跳过手算，第二遍拿纸笔跟着算。</li>
+  </ul>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">常见误区</p>
+    <p><strong>误区："零基础"等于"不用动笔"。</strong>恰恰相反——这本书的手算例子是它的核心资产。只用眼睛看，你会产生"我懂了"的错觉；只有亲手把 <code class="math">QKᵀ</code> 乘出来一次，理解才会真正发生。请准备好纸和笔，或者一个空白的电子笔记。</p>
+  </div>
+
+  <details class="quiz">
+    <summary>自测 1：为什么本书坚持"每个概念都手算一遍"，而不是直接给结论？</summary>
+    <div class="quiz-body">
+      <p>参考答案：手算把"看懂"变成"会做"。看懂的公式你只是认识了它，算过的公式你才拥有了它——你能感觉到每个数字从哪来、到哪去，也才能在日后自己改动模型时预判后果。对零基础读者来说，手算还是小步快跑的信心来源：每个例子的数字都小到可以验证，验证成功的正反馈会支撑你走完更抽象的章节。</p>
+    </div>
+  </details>
+
+  <details class="quiz">
+    <summary>自测 2：预备知识自检表里，哪一项和"注意力分数的计算"关系最直接？</summary>
+    <div class="quiz-body">
+      <p>参考答案：向量点积。第 3 章你会看到，注意力机制最核心的一步就是"用一个查询向量去和所有键向量做点积"，点积的大小代表"相关程度"。可以说整台 Transformer 里最频繁发生的运算就是点积。</p>
+    </div>
+  </details>
+
+  <details class="quiz">
+    <summary>自测 3：这本书建议的"两遍读法"分别做什么？</summary>
+    <div class="quiz-body">
+      <p>参考答案：第一遍只读正文和图、跳过手算，目的是建立整体地图，知道有哪些零件、各自解决什么问题；第二遍拿纸笔跟着手算例子，把每个数字亲手算出来，把地图变成真实的道路。</p>
+    </div>
+  </details>
+</section>
+
+<section class="chapter" id="ch01">
+  <header class="ch-head">
+    <p class="ch-eyebrow">第 1 章 · 为什么需要 Transformer</p>
+    <h2>Transformer 登场之前：三代方法的失败史</h2>
+    <p class="ch-lede">这一章不急着讲 Transformer 本身。我们要先当一回"考古学家"，看看在它之前人们怎么教机器理解语言，以及那些方法分别卡死在哪面墙上。读完你会明白：Transformer 的每个设计都不是炫技，而是在拆某一面具体的墙。</p>
+  </header>
+
+  <h3><span class="sec-no">1.1</span> 语言模型：一场"预测下一个词"的游戏</h3>
+
+  <p>先定义全书最重要的任务。所谓<strong>语言模型（Language Model, LM）</strong>，做的事情只有一件：</p>
+
+  <div class="formula">
+    给定前面的一串词，预测<span class="hl">下一个词</span>是什么。
+  </div>
+
+  <p>比如你给它"今天天气真"，它应该猜"好"；你给它"床前明月光，疑是地上"，它应该猜"霜"。就这么简单。你可能会问：<em>就这一个任务，怎么能长出 ChatGPT 那样的对话能力？</em></p>
+
+  <p>关键在于：<mark>要在这个游戏里拿高分，模型被迫学会关于世界的一切</mark>。想猜对"巴黎是 ___ 的首都"，它得懂地理；想猜对"把鸡蛋打进碗里，然后加入 ___"，它得懂做饭；想猜对一段代码的下一行，它得懂编程。预测下一个词这个看似简陋的游戏，实际上是通向通用智能的一条曲线路径——这是后来十年里整个领域最重要的发现之一，而现在它只是我们的出发点。</p>
+
+  <p>更形式化一点（别怕，马上有例子）：语言模型给词表里<em>每一个</em>候选词都算一个概率，加起来等于 1，形成一个概率分布。我们写成：</p>
+
+  <div class="formula">
+    P(下一个词 <span class="op">|</span> 前面所有的词) <span class="op">→</span> 一个加起来等于 1 的分布
+  </div>
+
+  <p>竖线 <code class="math">|</code> 读作"在……条件下"。这个公式读出来就是："在前面所有词都已知的条件下，下一个词是各个候选词的概率分别是多少。"接下来我们看看，2017 年之前的人们是怎么实现这个公式的，又是怎么失败的。</p>
+
+  <h3><span class="sec-no">1.2</span> 第一代：n-gram，只会数数的鹦鹉</h3>
+
+  <p>最古老、最直白的办法叫 <strong>n-gram 模型</strong>。它的思想朴素到可爱：<em>想知道"爱"后面跟什么词，就去书堆里数数。</em></p>
+
+  <p>所谓 <strong>bigram</strong>（bigram 就是 n=2 的 n-gram，"bi-"是"二"的意思），规则是：<mark>只看前一个词</mark>。想知道"我 爱 ___"里该填什么，就把语料库（一大堆文本）里所有"爱"字出现的场合翻出来，统计它后面都出现过哪些词、各几次，然后把次数换算成概率。</p>
+
+  <h4>手算一个真正的 bigram 例子</h4>
+
+  <p>假设我们的全部"语料库"只有下面这 8 句话（真实的语料库会有几十亿句，但原理一模一样）：</p>
+
+  <pre><code>我 爱 吃 苹果
+我 爱 吃 香蕉
+我 爱 吃 苹果
+我 爱 北京
+我 爱 吃 火锅
+他 爱 吃 苹果
+我 爱 学习
+我 爱 吃 饺子</code></pre>
+
+  <p>现在来回答：<strong>"我 爱 ___" 的横线上，bigram 模型认为每个词的概率是多少？</strong></p>
+
+  <p>第一步，统计"爱"后面跟过的词。逐句扫描，"爱"一共出现 8 次，后面分别跟着：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>候选词</th><th>出现次数</th><th>概率（次数 ÷ 8）</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>吃</td><td>5</td><td>5/8 = <strong>0.625</strong></td></tr>
+        <tr><td>北京</td><td>1</td><td>1/8 = <strong>0.125</strong></td></tr>
+        <tr><td>学习</td><td>1</td><td>1/8 = <strong>0.125</strong></td></tr>
+        <tr><td>（其他所有词）</td><td>0</td><td><strong>0</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>检查一下：0.625 + 0.125 + 0.125 = 1.0，是一个合法的概率分布。这就是 bigram 模型的全部"智能"——<mark>查表</mark>。输入"我 爱"，查表，吐出"吃（0.625）"。</p>
+
+  <p>用伪代码写出来，整个模型就三行：</p>
+
+  <pre><code>counts = {}                      # 一本账：(前词, 后词) → 次数
+for 语料里的每一对相邻词 (a, b):
+    counts[(a, b)] += 1          # 记账
+P(b | a) = counts[(a, b)] / 所有以 a 开头的次数   # 查账并换算成概率</code></pre>
+
+  <h4>它失败在哪？</h4>
+
+  <p>下面这张图把 bigram 的工作过程画了出来。请注意那条被"剪断"的线——它代表模型<mark>主动丢弃的全部上文</mark>：</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 760 300" role="img" aria-label="bigram 查表示意图：模型只看紧邻的前一个词，更早的词被剪掉">
+      <defs>
+        <marker id="arr-01n" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"></path>
+        </marker>
+      </defs>
+
+      <text x="30" y="30" font-family="inherit" font-size="13" fill="var(--muted)">输入句子：</text>
+
+      <!-- 上文词（灰色，被剪掉） -->
+      <g font-family="inherit" font-size="15" text-anchor="middle" opacity="0.45">
+        <rect x="30" y="52" width="92" height="40" rx="9" fill="var(--paper3)" stroke="var(--line)" stroke-dasharray="5 4"></rect>
+        <text x="76" y="78" fill="var(--muted)">昨 天</text>
+        <rect x="134" y="52" width="92" height="40" rx="9" fill="var(--paper3)" stroke="var(--line)" stroke-dasharray="5 4"></rect>
+        <text x="180" y="78" fill="var(--muted)">晚 上</text>
+      </g>
+      <!-- 剪刀标注 -->
+      <text x="250" y="46" font-family="inherit" font-size="12" fill="var(--accent2)">✂ 这些词被丢掉（模型看不见）</text>
+      <line x1="250" y1="52" x2="250" y2="94" stroke="var(--accent2)" stroke-width="1.6" stroke-dasharray="4 4"></line>
+
+      <!-- 前一个词（模型唯一看见的） -->
+      <g font-family="inherit" font-size="15" text-anchor="middle">
+        <rect x="268" y="52" width="92" height="40" rx="9" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"></rect>
+        <text x="314" y="78" fill="var(--accent-ink)" font-weight="700">我 爱</text>
+      </g>
+      <text x="314" y="112" font-family="inherit" font-size="11" text-anchor="middle" fill="var(--accent)">bigram 只看这一个词</text>
+
+      <!-- 查表箭头 -->
+      <line x1="360" y1="72" x2="440" y2="72" stroke="var(--accent)" stroke-width="2" marker-end="url(#arr-01n)"></line>
+      <text x="400" y="62" font-family="inherit" font-size="11.5" text-anchor="middle" fill="var(--accent)">查表</text>
+
+      <!-- 概率表 -->
+      <g font-family="inherit" font-size="13">
+        <rect x="448" y="30" width="180" height="112" rx="10" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="538" y="54" text-anchor="middle" fill="var(--muted)" font-size="11">“爱”后面跟过：</text>
+        <text x="470" y="80" fill="var(--ink)">吃　<tspan font-family="inherit" fill="var(--accent)" font-weight="700">62.5%</tspan></text>
+        <rect x="548" y="68" width="66" height="13" rx="4" fill="var(--accent)"></rect>
+        <text x="470" y="104" fill="var(--ink)">北京　<tspan font-family="inherit" fill="var(--accent)" font-weight="700">12.5%</tspan></text>
+        <rect x="548" y="92" width="13" height="13" rx="4" fill="var(--accent)"></rect>
+        <text x="470" y="128" fill="var(--ink)">学习　<tspan font-family="inherit" fill="var(--accent)" font-weight="700">12.5%</tspan></text>
+        <rect x="548" y="116" width="13" height="13" rx="4" fill="var(--accent)"></rect>
+      </g>
+
+      <!-- 底部：生成结果与吐槽 -->
+      <text x="30" y="176" font-family="inherit" font-size="13" fill="var(--muted)">输出预测：下一个词最可能是</text>
+      <rect x="200" y="154" width="66" height="36" rx="9" fill="var(--accent)" ></rect>
+      <text x="233" y="179" font-family="inherit" font-size="15" text-anchor="middle" fill="var(--paper)" font-weight="700">吃</text>
+      <text x="282" y="170" font-family="inherit" font-size="13" fill="var(--muted)">——哪怕上文明明是“昨天 晚上 我 恨……”，</text>
+      <text x="282" y="190" font-family="inherit" font-size="13" fill="var(--muted)">只要最后一个词是“爱”，答案永远是同一张表。</text>
+
+      <line x1="30" y1="216" x2="730" y2="216" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 5"></line>
+      <text x="30" y="240" font-family="inherit" font-size="12.5" fill="var(--muted)">trigram（看前 2 个词）稍好一点，但表格大小随 n 呈指数爆炸：</text>
+      <text x="30" y="264" font-family="inherit" font-size="12.5" fill="var(--muted)">词表 5 万时 4-gram 理论表项 ≈ 6×10¹⁸（量级估算），全世界的硬盘都装不下。</text>
+      <text x="30" y="288" font-family="inherit" font-size="12.5" fill="var(--muted)">这就是 n-gram 的两难：<tspan fill="var(--accent2)" font-weight="600">看得近</tspan> 与 <tspan fill="var(--accent2)" font-weight="600">装不下</tspan> 必居其一。</text>
+    </svg>
+    <figcaption>图 1-1　bigram 的本质是一台查表机。无论上文有多丰富，它只把紧邻的前一个词当作钥匙去查"后面跟过什么"的账本；剪刀左侧的信息被整体丢弃，这就是它永远理解不了语境的原因。</figcaption>
+  </figure>
+
+  <p><strong>失败一：它看不见更远的上文。</strong>注意上面例子里有句"他 爱 吃 苹果"。可如果实际句子是"我 恨 吃 ___"，bigram 仍然只会查"吃"后面的词，完全无视"恨"和"爱"的天壤之别。句子的意思是整句话共同决定的，而 bigram 的记忆只有<strong>一个词</strong>。</p>
+
+  <p><strong>失败二：没见过的组合，概率直接是 0。</strong>语料里"爱"后面从没出现过"你"，所以模型认为"我 爱 你"的概率是 0——尽管这是中文里最合理的句子之一。加大语料能缓解，但语言的组合是无穷的，总有没见过的组合。这个问题有个专门的名字叫<mark>数据稀疏</mark>，工程师们发明了各种"平滑"技巧（比如给所有没见过的组合偷偷匀一点概率）打补丁，但补丁终究是补丁。</p>
+
+  <p><strong>失败三：n 稍微大一点，表格就爆炸。</strong>想看得更远？trigram（看前 2 个词）的表格大小是词表规模的<em>立方</em>级别；4-gram 是四次方。词表按 5 万词估算，4-gram 的理论表项数约为 6×10¹⁸（量级估算），全世界的硬盘都装不下。于是 n-gram 被卡死在"看得近"和"装不下"的两难里。</p>
+
+  <p>下面的演示就是一个活的小 bigram 模型。它会先"读"一小段内置语料，然后你可以输入任意词查它的"账本"，还可以让它自己一个词一个词地采样生成句子。<mark>请务必点几次"自动生成 8 词"</mark>，亲眼看看一个只会查表的模型说出的话有多僵硬、多容易原地打转。</p>
+
+  <div class="demo-frame" data-demo="demo-ngram">正在加载交互演示…</div>
+
+  <p>玩完回来，你应该对两件事有了体感：第一，bigram 的"预测"本质就是一张查询表；第二，它生成的句子常常陷入循环（比如"猫 追 猫 追 猫"）或突然换话题，因为<mark>每走一步，它就把整句话的历史忘光了，只记得最后一个词</mark>。记住这个体感，它就是注意力和 Transformer 要拆的第一面墙。</p>
+
+  <h3><span class="sec-no">1.3</span> 第二代：RNN，一条必须排队通过的单行道</h3>
+
+  <p>既然问题是"记不住上文"，一个自然的改进是：给模型装一个<mark>记忆</mark>。这就是<strong>RNN（Recurrent Neural Network，循环神经网络）</strong>的思路，它的改进版 LSTM、GRU 在 2013–2017 年间统治了机器翻译。</p>
+
+  <p>RNN 的读法像一个边读书边记笔记的人：</p>
+
+  <ul>
+    <li>读第 1 个词，把理解写进一张"记忆便签"（技术上叫<mark>隐状态 hidden state</mark>，就是一排数字）；</li>
+    <li>读第 2 个词时，<strong>同时看着便签</strong>，更新便签；</li>
+    <li>读第 3 个词时，看着更新后的便签，再更新……</li>
+  </ul>
+
+  <p>这样，读到句子末尾时，便签里理论上浓缩了整句话的信息——比 bigram 的"只看前一个词"强太多了。但请看下面这张图，它藏着两个致命问题：</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 760 320" role="img" aria-label="RNN 串行处理示意图：五个词必须依次通过，每个时刻都要等前一时刻算完">
+      <defs>
+        <marker id="arr-01a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"></path>
+        </marker>
+        <marker id="arr-01b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent2)"></path>
+        </marker>
+      </defs>
+
+      <!-- 时间轴 -->
+      <line x1="40" y1="280" x2="720" y2="280" stroke="var(--line)" stroke-width="1.5"></line>
+      <polygon points="720,276 736,280 720,284" fill="var(--muted)"></polygon>
+      <text x="700" y="306" font-family="inherit" font-size="12" fill="var(--muted)">时间 t</text>
+
+      <!-- 时钟标注 -->
+      <text x="40" y="26" font-family="inherit" font-size="12.5" fill="var(--accent2)" font-weight="600">⏱ 关键事实：t=2 必须等 t=1 算完才能开始 —— 必须一个词一个词地等</text>
+
+      <!-- 词元输入 -->
+      <g font-family="inherit" font-size="15" text-anchor="middle">
+        <rect x="52" y="222" width="64" height="34" rx="8" fill="var(--paper3)" stroke="var(--line)"></rect>
+        <text x="84" y="244" fill="var(--ink)">我</text>
+        <rect x="182" y="222" width="64" height="34" rx="8" fill="var(--paper3)" stroke="var(--line)"></rect>
+        <text x="214" y="244" fill="var(--ink)">爱</text>
+        <rect x="312" y="222" width="64" height="34" rx="8" fill="var(--paper3)" stroke="var(--line)"></rect>
+        <text x="344" y="244" fill="var(--ink)">吃</text>
+        <rect x="442" y="222" width="64" height="34" rx="8" fill="var(--paper3)" stroke="var(--line)"></rect>
+        <text x="474" y="244" fill="var(--ink)">苹果</text>
+        <rect x="572" y="222" width="64" height="34" rx="8" fill="var(--paper3)" stroke="var(--line)"></rect>
+        <text x="604" y="244" fill="var(--ink)">。</text>
+      </g>
+      <g font-family="inherit" font-size="11" text-anchor="middle" fill="var(--muted)">
+        <text x="84" y="206">t = 1</text>
+        <text x="214" y="206">t = 2</text>
+        <text x="344" y="206">t = 3</text>
+        <text x="474" y="206">t = 4</text>
+        <text x="604" y="206">t = 5</text>
+      </g>
+
+      <!-- 输入到 RNN 单元的箭头 -->
+      <g stroke="var(--muted)" stroke-width="1.3">
+        <line x1="84" y1="222" x2="84" y2="152" marker-end="url(#arr-01a)"></line>
+        <line x1="214" y1="222" x2="214" y2="152" marker-end="url(#arr-01a)"></line>
+        <line x1="344" y1="222" x2="344" y2="152" marker-end="url(#arr-01a)"></line>
+        <line x1="474" y1="222" x2="474" y2="152" marker-end="url(#arr-01a)"></line>
+        <line x1="604" y1="222" x2="604" y2="152" marker-end="url(#arr-01a)"></line>
+      </g>
+
+      <!-- RNN 单元 -->
+      <g font-family="inherit" text-anchor="middle">
+        <rect x="52" y="92" width="64" height="60" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"></rect>
+        <text x="84" y="118" font-size="13" fill="var(--accent-ink)" font-weight="700">RNN</text>
+        <text x="84" y="138" font-size="10.5" fill="var(--muted)">h₁</text>
+
+        <rect x="182" y="92" width="64" height="60" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"></rect>
+        <text x="214" y="118" font-size="13" fill="var(--accent-ink)" font-weight="700">RNN</text>
+        <text x="214" y="138" font-size="10.5" fill="var(--muted)">h₂</text>
+
+        <rect x="312" y="92" width="64" height="60" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"></rect>
+        <text x="344" y="118" font-size="13" fill="var(--accent-ink)" font-weight="700">RNN</text>
+        <text x="344" y="138" font-size="10.5" fill="var(--muted)">h₃</text>
+
+        <rect x="442" y="92" width="64" height="60" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"></rect>
+        <text x="474" y="118" font-size="13" fill="var(--accent-ink)" font-weight="700">RNN</text>
+        <text x="474" y="138" font-size="10.5" fill="var(--muted)">h₄</text>
+
+        <rect x="572" y="92" width="64" height="60" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"></rect>
+        <text x="604" y="118" font-size="13" fill="var(--accent-ink)" font-weight="700">RNN</text>
+        <text x="604" y="138" font-size="10.5" fill="var(--muted)">h₅</text>
+      </g>
+
+      <!-- 隐状态传递箭头（串行链条，信号橙强调"等待"） -->
+      <g stroke="var(--accent2)" stroke-width="2.2">
+        <line x1="116" y1="122" x2="176" y2="122" marker-end="url(#arr-01b)"></line>
+        <line x1="246" y1="122" x2="306" y2="122" marker-end="url(#arr-01b)"></line>
+        <line x1="376" y1="122" x2="436" y2="122" marker-end="url(#arr-01b)"></line>
+        <line x1="506" y1="122" x2="566" y2="122" marker-end="url(#arr-01b)"></line>
+      </g>
+      <g font-family="inherit" font-size="10.5" text-anchor="middle" fill="var(--accent2)">
+        <text x="149" y="112">等 h₁ 算完</text>
+        <text x="279" y="112">等 h₂ 算完</text>
+        <text x="409" y="112">等 h₃ 算完</text>
+        <text x="539" y="112">等 h₄ 算完</text>
+      </g>
+
+      <!-- 底部注解 -->
+      <text x="40" y="70" font-family="inherit" font-size="12" fill="var(--muted)">隐状态 h（记忆便签）：一排数字，边读边更新。链条上的每一步都依赖上一步的结果 →</text>
+    </svg>
+    <figcaption>图 1-2　RNN 的串行链条。橙色箭头是"隐状态便签"的传递路线：每个时刻的计算都以上一时刻的便签为输入，所以五个词只能排成一队依次通过，无法同时进行。</figcaption>
+  </figure>
+
+  <h4>致命问题一：串行瓶颈——快不起来</h4>
+
+  <p>看图 1-2 的橙色箭头：处理"苹果"需要 h₃，h₃ 需要 h₂……<mark>一条 100 个词的句子，就要老老实实算 100 步，一步都不能少，一步都不能并行</mark>。</p>
+
+  <p>这在 2017 年是个要命的问题，因为那时 GPU 已经普及了。GPU 的天赋是"一万个简单的计算同时做"（像一万人同时打算盘），而不是"一个计算做得特别快"。RNN 的结构等于对 GPU 说："对不起，我这活只能一个人从头干到尾。"训练数据稍微大一点，RNN 的训练时间就以月计——不是算力不够，是<mark>结构上用不上算力</mark>。</p>
+
+  <h4>致命问题二：长程依赖——记不住</h4>
+
+  <p>第二个问题更隐蔽：便签只有一张，每读一个新词就要更新一次，<strong>旧信息会被反复覆盖</strong>。读到一个长句的末尾，开头的信息早就被覆盖得面目全非了。</p>
+
+  <p>最贴切的类比是<mark>传话游戏</mark>：一句话经过 20 个人口口相传，最后往往面目全非——不是哪个人故意的，而是每次转述都必然丢失一点点，误差层层累积。RNN 就是一场 100 人的传话游戏。看一个具体的句子：</p>
+
+  <div class="formula">
+    <span class="hl">那只在花园里追蝴蝶追了一下午的猫</span>，最后<span class="op">___</span>累了。
+  </div>
+
+  <p>横线上该填"它"还是"它们"？答案取决于<strong>18 个词之前</strong>的"猫"是单数——这种跨越漫长距离的信息关联，就叫<mark>长程依赖（long-range dependency）</mark>。对 RNN 来说，"猫"的信息要挤过 17 次便签覆盖才能传到横线处，等到的时候基本只剩杂音。LSTM 用精巧的"门"结构缓解了这个衰减，让有效记忆从十几个词延长到上百个词，但<strong>没有从结构上消灭它</strong>——传话游戏只是变长了，并没有被取消。</p>
+
+  <h3><span class="sec-no">1.4</span> 历史时刻：2017 年的那篇论文</h3>
+
+  <p>到 2017 年，领域的处境可以这样概括：n-gram 太瞎（看不见上文），RNN 太慢（不能并行）又健忘（长程衰减）。而与此同时，一种叫"注意力"的小零件（2014 年起被用作 RNN 的<em>附件</em>）展现出惊人的效果——它让模型在翻译时可以直接"回头看"原文的任何一个词，不再依赖那张被反复覆盖的便签。</p>
+
+  <p>于是 Google 的 8 位研究者（Vaswani、Shazeer、Parmar 等人）提出了一个大胆得近乎鲁莽的想法：</p>
+
+  <blockquote>
+    既然注意力这个"附件"这么好用，那我们<mark>把 RNN 主体整个扔掉</mark>，只用注意力，行不行？
+  </blockquote>
+
+  <p>这就是 2017 年 6 月发表的论文 <strong>《Attention Is All You Need》</strong>（"你只需要注意力"）——标题本身就是对 RNN 时代的告别宣言。答案不仅"行"，而且好得惊人：</p>
+
+  <div class="cols-2">
+    <div class="big-number">
+      <span class="bn-v">≈ 6500 万</span>
+      <span class="bn-k">base 版模型参数量（65M），比当时的 RNN 翻译系统更小</span>
+    </div>
+    <div class="big-number">
+      <span class="bn-v">≈ 12 小时</span>
+      <span class="bn-k">base 版在 8 块 GPU 上的训练时长（原论文报告 3.5 天训练 big 版）——同时代 RNN 系统需要数周</span>
+    </div>
+  </div>
+
+  <p>翻译质量（BLEU 分数）还同时刷到了历史新高。<strong>更小、更快、更好</strong>——三个维度同时碾压，这就是为什么这篇论文在此后几年内几乎"吞并"了整个自然语言处理领域，并在 2022 年底通过 ChatGPT 改变了世界。</p>
+
+  <div class="callout callout-info">
+    <p class="callout-title">为什么并行这么重要？</p>
+    <p>Transformer 里每个词的处理<strong>互不等待</strong>，100 个词可以同时进 GPU。训练时间的缩短不只是"省电费"——它让研究者敢于把模型做大 100 倍、把数据喂多 1000 倍。今天大模型的惊人能力，很大程度上是"并行化 → 规模化"这条链条的最终产物。可以说：注意力提供了配方，并行性提供了燃料。</p>
+  </div>
+
+  <h3><span class="sec-no">1.5</span> Transformer 总览：全书地图</h3>
+
+  <p>现在，第一次亮出整台机器。下面这张图是你未来八章的地图。<strong>现在完全看不懂没关系</strong>——这正是接下来八章要一块块拆开讲的东西。你只需要先记住三个形状：左边一块、右边一块、中间一条连线。</p>
+
+  <figure class="fig">
+    <div class="fig-scroll">
+    <svg viewBox="0 0 760 560" role="img" aria-label="Transformer 总览图：左侧编码器栈，右侧解码器栈，中间交叉注意力连接，各模块标注对应章节">
+      <defs>
+        <marker id="arr-01c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--ink)"></path>
+        </marker>
+        <marker id="arr-01d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent2)"></path>
+        </marker>
+      </defs>
+
+      <!-- 编码器大框 -->
+      <rect x="30" y="60" width="280" height="420" rx="16" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"></rect>
+      <text x="170" y="86" font-family="inherit" font-size="15" font-weight="700" text-anchor="middle" fill="var(--accent-ink)">编码器 Encoder ×6 层</text>
+      <text x="170" y="104" font-family="inherit" font-size="11" text-anchor="middle" fill="var(--muted)">职责：读懂输入句（自注意力：词与词互相看）</text>
+
+      <!-- 编码器内部模块 -->
+      <g font-family="inherit" text-anchor="middle">
+        <rect x="60" y="430" width="220" height="36" rx="9" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="170" y="453" font-size="12.5" fill="var(--ink)">词嵌入 + 位置编码 <tspan fill="var(--accent2)" font-size="10.5">（第 2 章）</tspan></text>
+
+        <rect x="60" y="330" width="220" height="36" rx="9" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="170" y="353" font-size="12.5" fill="var(--ink)">多头自注意力 <tspan fill="var(--accent2)" font-size="10.5">（第 3、4 章）</tspan></text>
+
+        <rect x="60" y="230" width="220" height="36" rx="9" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="170" y="253" font-size="12.5" fill="var(--ink)">前馈网络 + 残差/归一化 <tspan fill="var(--accent2)" font-size="10.5">（第 5 章）</tspan></text>
+      </g>
+
+      <!-- 编码器内部流向 -->
+      <g stroke="var(--ink)" stroke-width="1.5">
+        <line x1="170" y1="430" x2="170" y2="372" marker-end="url(#arr-01c)"></line>
+        <line x1="170" y1="330" x2="170" y2="272" marker-end="url(#arr-01c)"></line>
+      </g>
+
+      <!-- 解码器大框 -->
+      <rect x="450" y="60" width="280" height="420" rx="16" fill="var(--accent2-soft)" stroke="var(--accent2)" stroke-width="1.8"></rect>
+      <text x="590" y="86" font-family="inherit" font-size="15" font-weight="700" text-anchor="middle" fill="var(--accent2)">解码器 Decoder ×6 层</text>
+      <text x="590" y="104" font-family="inherit" font-size="11" text-anchor="middle" fill="var(--muted)">职责：边看编码结果，边逐词生成译文</text>
+
+      <!-- 解码器内部模块 -->
+      <g font-family="inherit" text-anchor="middle">
+        <rect x="480" y="430" width="220" height="36" rx="9" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="590" y="447" font-size="12.5" fill="var(--ink)" text-anchor="middle">词嵌入 + 位置编码</text>
+        <text x="590" y="462" font-size="10" fill="var(--accent2)" text-anchor="middle">（第 2 章）</text>
+
+        <rect x="480" y="356" width="220" height="36" rx="9" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="590" y="379" font-size="12.5" fill="var(--ink)">掩码自注意力 <tspan fill="var(--accent2)" font-size="10.5">（第 6 章）</tspan></text>
+
+        <rect x="480" y="282" width="220" height="40" rx="9" fill="var(--paper2)" stroke="var(--accent2)" stroke-width="1.6"></rect>
+        <text x="590" y="298" font-size="12.5" fill="var(--ink)" font-weight="600">交叉注意力 <tspan fill="var(--accent2)" font-size="10.5">（第 6 章）</tspan></text>
+        <text x="590" y="315" font-size="10.5" fill="var(--muted)">在这里"回头看"原文</text>
+
+        <rect x="480" y="196" width="220" height="44" rx="9" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="590" y="214" font-size="12.5" fill="var(--ink)" text-anchor="middle">前馈网络 + 残差/归一化</text>
+        <text x="590" y="230" font-size="10" fill="var(--accent2)" text-anchor="middle">（第 5 章）</text>
+
+        <rect x="480" y="122" width="220" height="44" rx="9" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="590" y="140" font-size="12.5" fill="var(--ink)" text-anchor="middle">输出概率（词表上的分布）</text>
+        <text x="590" y="156" font-size="10" fill="var(--accent2)" text-anchor="middle">（第 7、8 章）</text>
+      </g>
+
+      <!-- 解码器内部流向 -->
+      <g stroke="var(--ink)" stroke-width="1.5">
+        <line x1="590" y1="430" x2="590" y2="398" marker-end="url(#arr-01c)"></line>
+        <line x1="590" y1="356" x2="590" y2="328" marker-end="url(#arr-01c)"></line>
+        <line x1="590" y1="282" x2="590" y2="244" marker-end="url(#arr-01c)"></line>
+        <line x1="590" y1="196" x2="590" y2="170" marker-end="url(#arr-01c)"></line>
+      </g>
+
+      <!-- 交叉注意力连线：编码器输出 → 解码器交叉注意力 -->
+      <path d="M 310 200 C 380 200, 390 302, 474 302" fill="none" stroke="var(--accent2)" stroke-width="2.6" marker-end="url(#arr-01d)"></path>
+      <text x="382" y="238" font-family="inherit" font-size="11.5" fill="var(--accent2)" text-anchor="middle" font-weight="600">编码结果</text>
+      <text x="382" y="254" font-family="inherit" font-size="10.5" fill="var(--muted)" text-anchor="middle">（K、V 从这里来）</text>
+
+      <!-- 输入输出标注 -->
+      <g font-family="inherit" text-anchor="middle">
+        <text x="170" y="512" font-size="12.5" fill="var(--ink)">输入：源语言句子</text>
+        <text x="170" y="530" font-size="11.5" fill="var(--muted)">「我 爱 吃 苹果」</text>
+        <line x1="170" y1="502" x2="170" y2="472" stroke="var(--ink)" stroke-width="1.5" marker-end="url(#arr-01c)"></line>
+
+        <text x="590" y="512" font-size="12.5" fill="var(--ink)">已生成的译文前缀</text>
+        <text x="590" y="530" font-size="11.5" fill="var(--muted)">「I love」→ 预测下一个词</text>
+        <line x1="590" y1="502" x2="590" y2="472" stroke="var(--ink)" stroke-width="1.5" marker-end="url(#arr-01c)"></line>
+      </g>
+
+      <!-- 顶部标题 -->
+      <text x="380" y="34" font-family="inherit" font-size="14" font-weight="700" text-anchor="middle" fill="var(--ink)">Transformer（2017）：编码器–解码器全貌</text>
+    </svg>
+    </div>
+    <figcaption>图 1-3　全书地图。左块（编码器）负责读懂原文，右块（解码器）负责逐词生成译文，中间的橙色连线就是"回头看原文"的通道——它的学名是交叉注意力。每个灰色小框旁标注了讲解它的章节；第 6 章会把这张图重新拼起来做一次完整的机器翻译走查，第 9 章会告诉你 BERT 只留左块、GPT 只留右块。</figcaption>
+  </figure>
+
+  <p>用一句话概括这台机器相对前两代的突破：</p>
+
+  <ul>
+    <li>对 n-gram：它的"记性"不再是固定的 1~2 个词，<mark>每个词都可以直接看向句子里的任何其他词</mark>——这就是"注意力"；</li>
+    <li>对 RNN：词与词之间不再排队传便签，<mark>所有词同时进场、互相打量</mark>——这就是并行性。</li>
+  </ul>
+
+  <p>一句话总结全章：Transformer = 用注意力取代传话游戏 + 用并行取代排队。剩下的八章，只是把这句话翻译成数学和工程细节。</p>
+
+  <h3><span class="sec-no">1.6</span> 小结</h3>
+
+  <ul>
+    <li>语言模型的任务是"预测下一个词"；为了玩好这个游戏，模型被迫学会关于世界的知识。</li>
+    <li>n-gram 只会查表：看不见远处的上文、没见过的组合概率为 0、看得远就装不下。</li>
+    <li>RNN 有记忆便签，但<strong>串行</strong>（不能并行，用不上 GPU）且<strong>健忘</strong>（长程依赖在反复覆盖中衰减）。</li>
+    <li>2017 年《Attention Is All You Need》把 RNN 整个扔掉，只用注意力，结果更小、更快、更好。</li>
+    <li>全书地图：编码器（读懂输入）+ 解码器（逐词生成）+ 中间的交叉注意力通道。</li>
+  </ul>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">常见误区</p>
+    <p><strong>误区一："RNN 被淘汰是因为它效果差。"</strong>不准确。带注意力的 LSTM 在 2017 年效果并不差，它输 mainly 在<em>无法并行</em>导致的规模天花板。工程史上的失败常常不是"做得不好"，而是"长得不大"。</p>
+    <p><strong>误区二："Transformer 能并行，所以它不是逐个词生成的。"</strong>错。训练时编码器/解码器内部是并行的，但<em>生成译文</em>仍然是自回归的——一次吐一个词，第 8 章会细讲。并行体现在"读"和"训练"，不体现在"说"。</p>
+    <p><strong>误区三："注意力就是 AI 的'意识'或'理解'。"</strong>注意力是一个精确的数学运算（第 3 章会手算它），本质是"按相关度加权求和"。它很强大，但把它拟人化会阻碍你理解它真正的能力与局限。</p>
+  </div>
+
+  <details class="quiz">
+    <summary>自测 1：bigram 模型预测"我 爱 ___"时，为什么可能给出"吃（0.625）"？这个概率是怎么算出来的？</summary>
+    <div class="quiz-body">
+      <p>参考答案：bigram 统计语料中"爱"出现的全部 8 次，其中 5 次后面跟"吃"，所以 P(吃|爱) = 5/8 = 0.625。它只看紧邻的前一个词"爱"，"我"以及更远的上文完全不参与计算。</p>
+    </div>
+  </details>
+
+  <details class="quiz">
+    <summary>自测 2：RNN 的两个致命问题分别是什么？各自对应图 1-2 里的哪个视觉特征？</summary>
+    <div class="quiz-body">
+      <p>参考答案：（1）串行瓶颈——对应橙色箭头组成的"等待链条"，每步依赖上一步，100 个词必须算 100 步，无法并行；（2）长程依赖衰减——对应隐状态便签 h₁→h₂→…→h₅ 的反复覆盖，开头的信息传到末尾时已严重磨损，像传话游戏。</p>
+    </div>
+  </details>
+
+  <details class="quiz">
+    <summary>自测 3：2017 年那篇论文"激进"在哪里？它在哪三个维度上同时超越了 RNN 系统？</summary>
+    <div class="quiz-body">
+      <p>参考答案：激进在于把当时被认为不可或缺的 RNN 主体整个扔掉，只保留注意力机制（"Attention Is All You Need"）。三个维度是：模型更小（base 版 65M 参数）、训练更快（8 块 GPU 约 12 小时，RNN 需数周）、翻译质量更高（BLEU 分数刷新纪录）。</p>
+    </div>
+  </details>
+</section>
+

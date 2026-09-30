@@ -1,0 +1,622 @@
+<section class="chapter" id="ch06">
+  <header class="ch-head">
+    <p class="ch-eyebrow">第 6 章 · 完整编码器-解码器架构</p>
+    <h2>把零件拼成整机：一台 Transformer 的完整诞生</h2>
+    <p class="ch-lede">前面几章我们分别打磨了所有零件：词嵌入、位置编码、注意力、多头、前馈网络、Add &amp; Norm。这一章做两件事：把零件按图纸组装成 2017 年原论文里那台完整的「编码器-解码器」机器；然后给它通上电，跟着一句「我爱你」从头到尾走一遍，看它是怎么变成「I love you」的。学完本章，你将能画出完整架构图、说清掩码与交叉注意力的作用，并亲手算出约 65M 的参数量。</p>
+  </header>
+
+  <p>回顾一下我们已经拥有的零件清单，顺便标注它们各自来自哪一章：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>零件</th><th>作用（一句话）</th><th>来自</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>词嵌入（Embedding）</td><td>把每个词变成一个 512 维向量</td><td><a href="#ch02" class="xref">第 2 章</a></td></tr>
+        <tr><td>位置编码（Positional Encoding）</td><td>告诉模型每个词排在第几位</td><td><a href="#ch02" class="xref">第 2 章</a></td></tr>
+        <tr><td>缩放点积注意力</td><td>让每个词「看一眼」其他词，按相关性加权混合信息</td><td><a href="#ch03" class="xref">第 3 章</a></td></tr>
+        <tr><td>多头注意力（Multi-Head）</td><td>同时用 8 组不同的眼光看句子，捕捉多种关系</td><td><a href="#ch04" class="xref">第 4 章</a></td></tr>
+        <tr><td>前馈网络（FFN）</td><td>对每个位置独立地做「升维思考再降维」的加工</td><td><a href="#ch05" class="xref">第 5 章</a></td></tr>
+        <tr><td>Add &amp; Norm（残差 + 层归一化）</td><td>给深层网络修梯度高速公路，并把数值压回稳定范围</td><td><a href="#ch05" class="xref">第 5 章</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>本章要新增的只有<mark>两个零件</mark>：<strong>掩码自注意力</strong>（Masked Self-Attention）和<strong>交叉注意力</strong>（Cross-Attention）。它们都不是全新的数学——仍然是第 3 章那套 <code class="math">softmax(QKᵀ/√d_k)·V</code>，只是各做了一处小改动：一个给注意力分数矩阵「贴封条」，另一个换了 Q、K、V 的来源。马上就会看到。</p>
+
+  <h3><span class="sec-no">6.1</span> 组装：编码器栈与解码器栈</h3>
+
+  <p>Transformer 是一台「翻译机」形状的机器：左边一半叫<strong>编码器</strong>（Encoder），负责「读懂」输入句子；右边一半叫<strong>解码器</strong>（Decoder），负责「写出」输出句子。用翻译官来类比：编码器是一位精通中文的读者，把「我爱你」这句话反复咀嚼、彻底吃透，浓缩成一份「理解笔记」；解码器是另一位精通英文的写手，一边看着自己已经写出的英文，一边随时回头翻那份理解笔记，一个词一个词地把译文写出来。</p>
+
+  <p>原论文（Vaswani 等人，2017）的具体规格是：</p>
+
+  <ul>
+    <li><strong>编码器</strong>由 6 个完全相同的层摞起来（N = 6）。每层的内部结构是：<br>
+      多头自注意力 → Add &amp; Norm → 前馈网络（FFN）→ Add &amp; Norm。</li>
+    <li><strong>解码器</strong>同样 6 层，但每层内部是三个子层：<br>
+      <mark>掩码</mark>多头自注意力 → Add &amp; Norm → <mark>交叉</mark>注意力 → Add &amp; Norm → 前馈网络 → Add &amp; Norm。</li>
+    <li>解码器栈的输出最后经过一个<strong>线性层</strong>（Linear，把 512 维向量投到词表大小）和一个 <strong>softmax</strong>，得到「下一个词是词表中每个词的概率分布」。</li>
+  </ul>
+
+  <p>注意一个容易忽略的事实：6 个编码器层<strong>结构相同但参数不同</strong>。它们是 6 个独立训练出来的「读者」，不是同一个读者读 6 遍。打个比方：这像把一份文稿依次交给 6 位编辑审校，每位编辑的批注风格（权重）都不一样，文稿每过一手就更精炼一分。解码器的 6 层同理。</p>
+
+  <div class="callout callout-info">
+    <p class="callout-title">术语对齐：栈（Stack）</p>
+    <p>「编码器栈」就是「一摞编码器层」的意思。数据从第 1 层流进去，每层的输出是下一层的输入，第 6 层的输出就是整个编码器的最终产物。原论文用 N× 这个记号表示「同样的层重复 N 次」，N = 6。</p>
+  </div>
+
+  <h3><span class="sec-no">6.2</span> 整机图纸：架构总览</h3>
+
+  <p>下面这幅图就是原论文 Figure 1 的「零基础重绘版」。数据在图中自下而上流动。请先只看左半边的编码器：输入的中文经过嵌入和位置编码后，进入 6 层相同的加工流水线；再看右半边的解码器：已经生成的英文（一开始只有一个起始符）同样先嵌入、加位置，然后进入 6 层流水线，每层里有三个子层；最后经线性层和 softmax 输出下一个词的概率。</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 760 640" role="img" aria-label="Transformer 完整架构总览图" font-family="inherit">
+      <defs>
+        <marker id="arr-06a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--muted)"></path>
+        </marker>
+        <marker id="arr-06b" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--accent2)"></path>
+        </marker>
+      </defs>
+
+      <!-- 编码器外框 -->
+      <rect x="60" y="90" width="250" height="400" rx="14" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="6 4"></rect>
+      <text x="185" y="78" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent)">编码器栈 ×6</text>
+
+      <!-- 解码器外框 -->
+      <rect x="450" y="60" width="250" height="460" rx="14" fill="var(--accent2-soft)" stroke="var(--accent2)" stroke-width="1.5" stroke-dasharray="6 4"></rect>
+      <text x="575" y="48" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent2)">解码器栈 ×6</text>
+
+      <!-- 编码器层内模块（自下而上） -->
+      <rect x="90" y="380" width="190" height="40" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="185" y="404" text-anchor="middle" font-size="13" fill="var(--ink)">多头自注意力</text>
+
+      <rect x="90" y="320" width="190" height="34" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="185" y="341" text-anchor="middle" font-size="13" fill="var(--ink)">Add &amp; Norm</text>
+
+      <rect x="90" y="250" width="190" height="40" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="185" y="274" text-anchor="middle" font-size="13" fill="var(--ink)">前馈网络 FFN</text>
+
+      <rect x="90" y="190" width="190" height="34" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="185" y="211" text-anchor="middle" font-size="13" fill="var(--ink)">Add &amp; Norm</text>
+
+      <!-- 编码器内部箭头 -->
+      <line x1="185" y1="380" x2="185" y2="356" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+      <line x1="185" y1="320" x2="185" y2="292" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+      <line x1="185" y1="250" x2="185" y2="226" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+
+      <!-- 解码器层内模块（自下而上） -->
+      <rect x="480" y="430" width="190" height="40" rx="8" fill="var(--paper2)" stroke="var(--accent2)"></rect>
+      <text x="575" y="448" text-anchor="middle" font-size="13" fill="var(--ink)">掩码多头自注意力</text>
+      <text x="575" y="464" text-anchor="middle" font-size="10" fill="var(--accent2)">不许看未来</text>
+
+      <rect x="480" y="380" width="190" height="30" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="575" y="399" text-anchor="middle" font-size="12" fill="var(--ink)">Add &amp; Norm</text>
+
+      <rect x="480" y="320" width="190" height="40" rx="8" fill="var(--paper2)" stroke="var(--accent2)"></rect>
+      <text x="575" y="338" text-anchor="middle" font-size="13" fill="var(--ink)">交叉注意力</text>
+      <text x="575" y="354" text-anchor="middle" font-size="10" fill="var(--accent2)">K、V 来自编码器</text>
+
+      <rect x="480" y="270" width="190" height="30" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="575" y="289" text-anchor="middle" font-size="12" fill="var(--ink)">Add &amp; Norm</text>
+
+      <rect x="480" y="210" width="190" height="40" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="575" y="234" text-anchor="middle" font-size="13" fill="var(--ink)">前馈网络 FFN</text>
+
+      <rect x="480" y="160" width="190" height="30" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="575" y="179" text-anchor="middle" font-size="12" fill="var(--ink)">Add &amp; Norm</text>
+
+      <!-- 解码器内部箭头 -->
+      <line x1="575" y1="430" x2="575" y2="412" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+      <line x1="575" y1="380" x2="575" y2="362" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+      <line x1="575" y1="320" x2="575" y2="302" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+      <line x1="575" y1="270" x2="575" y2="252" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+      <line x1="575" y1="210" x2="575" y2="192" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+
+      <!-- 底部：输入与嵌入 -->
+      <text x="185" y="586" text-anchor="middle" font-size="14" fill="var(--ink)">输入：我 爱 你</text>
+      <rect x="90" y="530" width="90" height="30" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="135" y="549" text-anchor="middle" font-size="12" fill="var(--ink)">词嵌入</text>
+      <rect x="190" y="530" width="90" height="30" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="235" y="549" text-anchor="middle" font-size="12" fill="var(--ink)">位置编码 +</text>
+      <line x1="185" y1="575" x2="185" y2="562" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+      <line x1="185" y1="530" x2="185" y2="492" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+
+      <text x="575" y="606" text-anchor="middle" font-size="14" fill="var(--ink)">已生成输出：&lt;s&gt; I</text>
+      <rect x="480" y="550" width="90" height="30" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="525" y="569" text-anchor="middle" font-size="12" fill="var(--ink)">词嵌入</text>
+      <rect x="580" y="550" width="90" height="30" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="625" y="569" text-anchor="middle" font-size="12" fill="var(--ink)">位置编码 +</text>
+      <line x1="575" y1="595" x2="575" y2="582" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+      <line x1="575" y1="550" x2="575" y2="522" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+
+      <!-- 顶部：输出头 -->
+      <line x1="575" y1="160" x2="575" y2="138" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+      <rect x="480" y="108" width="190" height="28" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="575" y="126" text-anchor="middle" font-size="12" fill="var(--ink)">线性层 Linear</text>
+      <line x1="575" y1="108" x2="575" y2="92" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+      <rect x="480" y="62" width="190" height="28" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="575" y="80" text-anchor="middle" font-size="12" fill="var(--ink)">Softmax</text>
+      <text x="575" y="30" text-anchor="middle" font-size="14" fill="var(--ink)">输出概率：P(下一个词)</text>
+      <line x1="575" y1="62" x2="575" y2="40" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06a)"></line>
+
+      <!-- 编码器 → 解码器 的交叉注意力连线 -->
+      <path d="M 185 190 L 185 120 L 400 120 L 400 340 L 478 340" fill="none" stroke="var(--accent2)" stroke-width="2" marker-end="url(#arr-06b)"></path>
+      <text x="330" y="112" text-anchor="middle" font-size="12" fill="var(--accent2)">编码器最终输出（理解笔记）→ 送进每一层的交叉注意力</text>
+    </svg>
+    <figcaption>图 6-1　Transformer 完整架构总览（原论文 Figure 1 的简化重绘）。左半边是 6 层编码器，右半边是 6 层解码器。解码器比编码器多两个东西：掩码自注意力（橙色虚线框内第一个模块）和交叉注意力（接收来自编码器的 K、V）。数据自下而上流动；图中只画出一层，「×6」表示同样的层叠 6 次。</figcaption>
+  </figure>
+
+  <div class="callout callout-tip">
+    <p class="callout-title">读图小技巧</p>
+    <p>第一次看这种架构图不要试图「全记住」。只记三件事就够了：① 左边读、右边写；② 右边每层比左边多一个「交叉注意力」，那是左右两边唯一的桥梁；③ 所有层内部都是「注意力 + FFN + Add &amp; Norm」的重复排列。剩下的都是细节，用到再回来查。</p>
+  </div>
+
+  <h3><span class="sec-no">6.3</span> 掩码自注意力：不许偷看未来的词</h3>
+
+  <p>先问一个问题：训练的时候，解码器明明一次性拿到了整句正确答案「&lt;s&gt; I love you」（这叫教师强制，<a href="#ch07" class="xref">第 7 章</a>细讲），那它预测「love」这个词的时候，输入里不就躺着「love」本身吗？直接照抄不就行了？</p>
+
+  <p>没错——如果不加任何限制，模型一定会学会「作弊」：预测第 3 个位置时去偷看第 3 个位置的答案。这样的模型训练 loss 会漂亮地降到接近 0，但到了真实使用时（此时未来的词根本不存在），它立刻抓瞎。这就像考试时每道题都允许翻看后面题的答案，分数很好看，一上考场独立作答就露馅。</p>
+
+  <p>解决办法出奇地简单：<mark>在注意力分数矩阵的上三角贴上封条</mark>。回忆<a href="#ch03" class="xref">第 3 章</a>：注意力分数矩阵的第 i 行第 j 列，表示「第 i 个词对第 j 个词的关注程度」。我们要规定：<strong>第 i 个词只允许看位置 ≤ i 的词</strong>（自己和过去），不允许看位置 &gt; i 的词（未来）。做法是在 softmax 之前，把上三角（j &gt; i 的格子）的分数全部替换成 <code class="math">−∞</code>。</p>
+
+  <div class="formula">
+    掩码注意力 = softmax( <span class="hl">QKᵀ/√d_k</span> <span class="op">+ M</span> ) · V ，其中 M 的上三角为 −∞，其余为 0
+  </div>
+
+  <p>为什么填 −∞ 就行？因为 softmax 对每个数取 e 的指数：<code class="math">e^(−∞) = 0</code>。于是被封条的格子在 softmax 之后<mark>恰好变成概率 0</mark>——那个词对未来词的注意力权重是精确的 0，一丁点信息都流不过去。而其他格子加的是 0，分数不变。这就是「因果掩码」（Causal Mask）：保证位置 i 的输出只由位置 1…i 决定，像因果律一样，结果不能先于原因。</p>
+
+  <h4>一个 4×4 的完整数值例子</h4>
+
+  <p>假设解码器正在处理「&lt;s&gt; I love you」这 4 个词（&lt;s&gt; 是起始符）。某一层、某一个头算出来的原始分数矩阵 QKᵀ/√d_k 如下（数字是编的，只为演示）：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>分数（掩码前）</th><th>看 &lt;s&gt;</th><th>看 I</th><th>看 love</th><th>看 you</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>第 1 行：&lt;s&gt; 在看</td><td>2.0</td><td>1.0</td><td>0.5</td><td>0.2</td></tr>
+        <tr><td>第 2 行：I 在看</td><td>1.5</td><td>2.2</td><td>0.8</td><td>1.1</td></tr>
+        <tr><td>第 3 行：love 在看</td><td>0.3</td><td>1.8</td><td>2.5</td><td>0.9</td></tr>
+        <tr><td>第 4 行：you 在看</td><td>0.1</td><td>0.6</td><td>1.9</td><td>2.8</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>先看第 2 行（「I」这一行）：它合法的关注对象只有 &lt;s&gt; 和自己（位置 1、2），所以「看 love」「看 you」两列被贴上 −∞：</p>
+
+  <div class="formula">
+    第 2 行掩码后： [ 1.5, 2.2, <span class="op">−∞</span>, <span class="op">−∞</span> ]
+  </div>
+
+  <p>对这一行做 softmax。先算指数：e^1.5 ≈ 4.48，e^2.2 ≈ 9.03，两个 −∞ 的指数是 0。分母 = 4.48 + 9.03 + 0 + 0 = 13.51。于是：</p>
+
+  <div class="formula">
+    softmax 后第 2 行： [ 4.48/13.51, 9.03/13.51, 0, 0 ] = [ <span class="hl">0.33, 0.67, 0, 0</span> ]
+  </div>
+
+  <p>对比一下：如果<strong>不</strong>加掩码，第 2 行 softmax 会牵涉全部 4 个数（e^1.5≈4.48、e^2.2≈9.03、e^0.8≈2.23、e^1.1≈3.00，分母 ≈ 18.74），得到 [0.24, 0.48, 0.12, 0.16]——「I」白白分出 12% 的注意力给 love、16% 给 you，这就是偷看。完整的前后对比见下表（每行独立做 softmax，−∞ 格严格归零；数值保留两位小数）：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>行</th><th>掩码前 softmax（作弊版）</th><th>掩码后 softmax（正确版）</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>&lt;s&gt; 在看</td><td>[0.57, 0.21, 0.13, 0.09]（分母 ≈ 13.0）</td><td>[1.00, 0, 0, 0] —— 只能看自己</td></tr>
+        <tr><td>I 在看</td><td>[0.24, 0.48, 0.12, 0.16]（分母 ≈ 18.7）</td><td>[0.33, 0.67, 0, 0]（分母 ≈ 13.5）</td></tr>
+        <tr><td>love 在看</td><td>[0.06, 0.27, 0.55, 0.11]（分母 ≈ 22.0）</td><td>[0.07, 0.31, 0.62, 0]（分母 ≈ 19.6）</td></tr>
+        <tr><td>you 在看</td><td>[0.04, 0.07, 0.26, 0.63]（分母 ≈ 26.1）</td><td>[0.04, 0.07, 0.26, 0.63] —— 全在左侧，不受影响</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>注意最后一行「you 在看」：它是最后一个词，前面所有词对它来说都是「过去」，所以它那一行的掩码是 [0, 0, 0, 0]，等于没贴封条，前后数字相同。这正是掩码矩阵的形态——<strong>对角线及以下放行，对角线以上封死</strong>：</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 720 320" role="img" aria-label="4×4 因果掩码矩阵示意图" font-family="inherit">
+      <defs>
+        <marker id="arr-06c" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--muted)"></path>
+        </marker>
+      </defs>
+      <text x="190" y="28" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">掩码矩阵 M（加在分数上）</text>
+      <g font-size="13" text-anchor="middle">
+        <rect x="70" y="50" width="60" height="44" fill="var(--accent3-soft)" stroke="var(--line)"></rect><text x="100" y="77" fill="var(--ink)">0</text>
+        <rect x="130" y="50" width="60" height="44" fill="var(--accent2-soft)" stroke="var(--line)"></rect><text x="160" y="77" fill="var(--accent2)">−∞</text>
+        <rect x="190" y="50" width="60" height="44" fill="var(--accent2-soft)" stroke="var(--line)"></rect><text x="220" y="77" fill="var(--accent2)">−∞</text>
+        <rect x="250" y="50" width="60" height="44" fill="var(--accent2-soft)" stroke="var(--line)"></rect><text x="280" y="77" fill="var(--accent2)">−∞</text>
+
+        <rect x="70" y="94" width="60" height="44" fill="var(--accent3-soft)" stroke="var(--line)"></rect><text x="100" y="121" fill="var(--ink)">0</text>
+        <rect x="130" y="94" width="60" height="44" fill="var(--accent3-soft)" stroke="var(--line)"></rect><text x="160" y="121" fill="var(--ink)">0</text>
+        <rect x="190" y="94" width="60" height="44" fill="var(--accent2-soft)" stroke="var(--line)"></rect><text x="220" y="121" fill="var(--accent2)">−∞</text>
+        <rect x="250" y="94" width="60" height="44" fill="var(--accent2-soft)" stroke="var(--line)"></rect><text x="280" y="121" fill="var(--accent2)">−∞</text>
+
+        <rect x="70" y="138" width="60" height="44" fill="var(--accent3-soft)" stroke="var(--line)"></rect><text x="100" y="165" fill="var(--ink)">0</text>
+        <rect x="130" y="138" width="60" height="44" fill="var(--accent3-soft)" stroke="var(--line)"></rect><text x="160" y="165" fill="var(--ink)">0</text>
+        <rect x="190" y="138" width="60" height="44" fill="var(--accent3-soft)" stroke="var(--line)"></rect><text x="220" y="165" fill="var(--ink)">0</text>
+        <rect x="250" y="138" width="60" height="44" fill="var(--accent2-soft)" stroke="var(--line)"></rect><text x="280" y="165" fill="var(--accent2)">−∞</text>
+
+        <rect x="70" y="182" width="60" height="44" fill="var(--accent3-soft)" stroke="var(--line)"></rect><text x="100" y="209" fill="var(--ink)">0</text>
+        <rect x="130" y="182" width="60" height="44" fill="var(--accent3-soft)" stroke="var(--line)"></rect><text x="160" y="209" fill="var(--ink)">0</text>
+        <rect x="190" y="182" width="60" height="44" fill="var(--accent3-soft)" stroke="var(--line)"></rect><text x="220" y="209" fill="var(--ink)">0</text>
+        <rect x="250" y="182" width="60" height="44" fill="var(--accent3-soft)" stroke="var(--line)"></rect><text x="280" y="209" fill="var(--ink)">0</text>
+      </g>
+      <g font-size="11" fill="var(--muted)" text-anchor="middle">
+        <text x="100" y="44">&lt;s&gt;</text><text x="160" y="44">I</text><text x="220" y="44">love</text><text x="280" y="44">you</text>
+        <text x="58" y="76" text-anchor="end">&lt;s&gt;</text><text x="58" y="120" text-anchor="end">I</text><text x="58" y="164" text-anchor="end">love</text><text x="58" y="208" text-anchor="end">you</text>
+      </g>
+      <text x="190" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">行 = 谁在提问，列 = 看谁。绿色放行（+0），橙色封条（−∞）</text>
+
+      <line x1="330" y1="140" x2="390" y2="140" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06c)"></line>
+      <text x="360" y="128" text-anchor="middle" font-size="11" fill="var(--muted)">softmax 后</text>
+
+      <text x="520" y="28" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">掩码后的注意力权重</text>
+      <g font-size="11" text-anchor="middle">
+        <rect x="400" y="50" width="60" height="44" fill="var(--accent)" opacity="0.9" stroke="var(--line)"></rect><text x="430" y="76" fill="var(--paper)">1.00</text>
+        <rect x="460" y="50" width="60" height="44" fill="var(--paper3)" stroke="var(--line)"></rect><text x="490" y="76" fill="var(--muted)">0</text>
+        <rect x="520" y="50" width="60" height="44" fill="var(--paper3)" stroke="var(--line)"></rect><text x="550" y="76" fill="var(--muted)">0</text>
+        <rect x="580" y="50" width="60" height="44" fill="var(--paper3)" stroke="var(--line)"></rect><text x="610" y="76" fill="var(--muted)">0</text>
+
+        <rect x="400" y="94" width="60" height="44" fill="var(--accent)" opacity="0.4" stroke="var(--line)"></rect><text x="430" y="120" fill="var(--ink)">0.33</text>
+        <rect x="460" y="94" width="60" height="44" fill="var(--accent)" opacity="0.75" stroke="var(--line)"></rect><text x="490" y="120" fill="var(--ink)">0.67</text>
+        <rect x="520" y="94" width="60" height="44" fill="var(--paper3)" stroke="var(--line)"></rect><text x="550" y="120" fill="var(--muted)">0</text>
+        <rect x="580" y="94" width="60" height="44" fill="var(--paper3)" stroke="var(--line)"></rect><text x="610" y="120" fill="var(--muted)">0</text>
+
+        <rect x="400" y="138" width="60" height="44" fill="var(--accent)" opacity="0.15" stroke="var(--line)"></rect><text x="430" y="164" fill="var(--ink)">0.07</text>
+        <rect x="460" y="138" width="60" height="44" fill="var(--accent)" opacity="0.38" stroke="var(--line)"></rect><text x="490" y="164" fill="var(--ink)">0.31</text>
+        <rect x="520" y="138" width="60" height="44" fill="var(--accent)" opacity="0.68" stroke="var(--line)"></rect><text x="550" y="164" fill="var(--ink)">0.62</text>
+        <rect x="580" y="138" width="60" height="44" fill="var(--paper3)" stroke="var(--line)"></rect><text x="610" y="164" fill="var(--muted)">0</text>
+
+        <rect x="400" y="182" width="60" height="44" fill="var(--accent)" opacity="0.1" stroke="var(--line)"></rect><text x="430" y="208" fill="var(--ink)">0.04</text>
+        <rect x="460" y="182" width="60" height="44" fill="var(--accent)" opacity="0.12" stroke="var(--line)"></rect><text x="490" y="208" fill="var(--ink)">0.07</text>
+        <rect x="520" y="182" width="60" height="44" fill="var(--accent)" opacity="0.25" stroke="var(--line)"></rect><text x="550" y="208" fill="var(--ink)">0.26</text>
+        <rect x="580" y="182" width="60" height="44" fill="var(--accent)" opacity="0.62" stroke="var(--line)"></rect><text x="610" y="208" fill="var(--ink)">0.63</text>
+      </g>
+      <g font-size="11" fill="var(--muted)" text-anchor="middle">
+        <text x="430" y="44">&lt;s&gt;</text><text x="490" y="44">I</text><text x="550" y="44">love</text><text x="610" y="44">you</text>
+      </g>
+      <text x="520" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">上三角严格为 0：未来的词得不到任何注意力</text>
+      <text x="380" y="298" text-anchor="middle" font-size="13" fill="var(--ink)">类比：考试时每道题只允许参考前面题的草稿，绝不许翻后面的答案</text>
+    </svg>
+    <figcaption>图 6-2　因果掩码如何工作。左边是加在注意力分数上的掩码矩阵 M（下三角 0、上三角 −∞）；右边是 softmax 之后的注意力权重，上三角被精确压成 0（灰色格）。颜色越深表示权重越大。</figcaption>
+  </figure>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">常见混淆：掩码是「加法掩码」，不是把格子删掉</p>
+    <p>实现上并不是把矩阵的上三角抠掉（矩阵形状不变，仍然是整齐的 4×4），而是在 softmax 之前把一个上三角为 −∞ 的矩阵<strong>加</strong>到分数上。这样做的好处是：GPU 上仍然是一次整齐的矩阵乘法，不需要任何分支判断，速度几乎不受影响。实际代码里通常用一个很大的负数（如 −10⁹）代替真正的 −∞，避免数值溢出。</p>
+  </div>
+
+  <p>为什么编码器不需要这个掩码？因为编码器的任务是「阅读理解」——它读的是完整给定的输入句，每个词本来就应该看到全句的上下文（「我爱你」里「爱」的确切含义本来就同时受「我」和「你」的影响）。只有「写作」这一侧才需要防偷看。顺带预告：<a href="#ch09" class="xref">第 9 章</a>会讲到，GPT 这类纯生成模型整个网络都用掩码自注意力，因为它们唯一的工作就是不停地写下一个词。</p>
+
+  <h3><span class="sec-no">6.4</span> 交叉注意力：翻译官回头查原句</h3>
+
+  <p>解码器层里第二个新零件是<strong>交叉注意力</strong>（Cross-Attention）。它和自注意力的公式一模一样，区别只在 Q、K、V 的<strong>来源</strong>：</p>
+
+  <ul>
+    <li><strong>自注意力</strong>：Q、K、V 三个都来自同一个序列——一个词问自己序列里的其他词「你们谁跟我关系大」。</li>
+    <li><strong>交叉注意力</strong>：<mark>Q 来自解码器</mark>（正在写的译文，提问方），<mark>K 和 V 来自编码器的最终输出</mark>（那句中文的理解笔记，被查询方）。</li>
+  </ul>
+
+  <p>用翻译官类比：写手（解码器）每写一个新词之前，都会拿「我现在写到哪了、想表达什么」（Q）去原句笔记（K、V）里检索：「原句里哪个词跟我现在要写的词最相关？」写「love」时，检索结果会高度集中在中文的「爱」上，于是「爱」的向量信息大权重地流进译文。这就是<mark>翻译官一边写译文、一边回头查原句</mark>的动作。</p>
+
+  <div class="formula">
+    交叉注意力 = softmax( <span class="hl">Q<sub>解码器</sub></span> · <span class="op">K<sub>编码器</sub></span>ᵀ / √d_k ) · <span class="op">V<sub>编码器</sub></span>
+  </div>
+
+  <p>注意形状的变化（这是交叉注意力最迷人的地方）：解码器一侧有 n 个词，编码器一侧有 m 个词，则注意力分数矩阵是 <code class="math">[n × m]</code>——<strong>不要求两边等长</strong>！中文 3 个词、英文 4 个词，矩阵就是 4×3，每个英文词自由地对所有中文词分配注意力。机器翻译里源句和译句长度几乎从不相等，交叉注意力天然处理这一点。</p>
+
+  <p>还有一个工程细节值得记住：编码器的最终输出只算<strong>一次</strong>，然后被送进解码器<mark>每一层</mark>的交叉注意力（每一层有自己的 K、V 投影矩阵，会把同一份笔记「翻译」成适合自己楼层的检索格式）。所以图 6-1 里那条橙色长线是从编码器顶端连向解码器每一层中部的。</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 760 330" role="img" aria-label="交叉注意力数据流示意图" font-family="inherit">
+      <defs>
+        <marker id="arr-06d" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--muted)"></path>
+        </marker>
+        <marker id="arr-06e" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)"></path>
+        </marker>
+        <marker id="arr-06f" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--accent2)"></path>
+        </marker>
+      </defs>
+
+      <!-- 编码器侧 -->
+      <rect x="40" y="210" width="200" height="56" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"></rect>
+      <text x="140" y="234" text-anchor="middle" font-size="13" fill="var(--ink)">编码器最终输出</text>
+      <text x="140" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">「我 爱 你」 [3×512]</text>
+
+      <!-- K V 投影 -->
+      <rect x="60" y="120" width="70" height="34" rx="8" fill="var(--paper2)" stroke="var(--accent2)" stroke-width="1.5"></rect>
+      <text x="95" y="141" text-anchor="middle" font-size="12" fill="var(--accent2)">K</text>
+      <rect x="150" y="120" width="70" height="34" rx="8" fill="var(--paper2)" stroke="var(--accent2)" stroke-width="1.5"></rect>
+      <text x="185" y="141" text-anchor="middle" font-size="12" fill="var(--accent2)">V</text>
+      <line x1="120" y1="210" x2="100" y2="156" stroke="var(--accent2)" stroke-width="1.5" marker-end="url(#arr-06f)"></line>
+      <line x1="165" y1="210" x2="180" y2="156" stroke="var(--accent2)" stroke-width="1.5" marker-end="url(#arr-06f)"></line>
+      <text x="140" y="104" text-anchor="middle" font-size="11" fill="var(--muted)">K、V 各 [3×512]：原句的「检索目录 + 内容」</text>
+
+      <!-- 解码器侧 -->
+      <rect x="480" y="210" width="220" height="56" rx="10" fill="var(--accent2-soft)" stroke="var(--accent2)"></rect>
+      <text x="590" y="234" text-anchor="middle" font-size="13" fill="var(--ink)">解码器当前状态</text>
+      <text x="590" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">「&lt;s&gt; I …」 [4×512]（掩码自注意力的输出）</text>
+
+      <!-- Q 投影 -->
+      <rect x="560" y="120" width="70" height="34" rx="8" fill="var(--paper2)" stroke="var(--accent)" stroke-width="1.5"></rect>
+      <text x="595" y="141" text-anchor="middle" font-size="12" fill="var(--accent)">Q</text>
+      <line x1="593" y1="210" x2="595" y2="156" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arr-06e)"></line>
+      <text x="600" y="104" text-anchor="middle" font-size="11" fill="var(--muted)">Q [4×512]：译文的「提问」</text>
+
+      <!-- 注意力汇合 -->
+      <rect x="290" y="30" width="180" height="52" rx="10" fill="var(--paper2)" stroke="var(--ink)" stroke-width="1.5"></rect>
+      <text x="380" y="52" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">softmax(QKᵀ/√d_k)·V</text>
+      <text x="380" y="70" text-anchor="middle" font-size="11" fill="var(--muted)">分数矩阵 [4×3]，输出 [4×512]</text>
+
+      <path d="M 130 120 C 130 60, 260 56, 288 56" fill="none" stroke="var(--accent2)" stroke-width="1.5" marker-end="url(#arr-06f)"></path>
+      <path d="M 595 120 C 595 60, 500 56, 472 56" fill="none" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arr-06e)"></path>
+
+      <!-- 输出回流 -->
+      <path d="M 380 82 L 380 200 L 590 200" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06d)" stroke-dasharray="5 4"></path>
+      <text x="490" y="192" text-anchor="middle" font-size="11" fill="var(--muted)">融合后的信息回到解码器主路</text>
+
+      <text x="380" y="310" text-anchor="middle" font-size="13" fill="var(--ink)">翻译官一边写译文（Q 提问），一边回头查原句笔记（K 检索、V 取内容）</text>
+    </svg>
+    <figcaption>图 6-3　交叉注意力的数据流。Q 来自解码器（蓝色，提问方），K、V 来自编码器输出（橙色，被查询方）。注意力分数矩阵形状是 [译文长度 × 原文长度] = [4×3]，两边不要求等长。</figcaption>
+  </figure>
+
+  <div class="callout callout-info">
+    <p class="callout-title">为什么叫「交叉」</p>
+    <p>因为信息在两个序列之间「交叉」流动：解码器出的问题，编码器出的答案素材。这一座桥，就是整台机器里中文信息与英文信息相遇的唯一地点。没有它，解码器就是个只会自言自语英文、完全不认识中文的写手。</p>
+  </div>
+
+
+  <h3><span class="sec-no">6.5</span> 完整走查：「我爱你」怎么变成「I love you」</h3>
+
+  <p>零件全部就位，现在给这台机器通电。我们跟着一句「我爱你」从头到尾走一遍前向传播（forward pass）——也就是「数据从输入流到输出」的完整旅程。请特别留意每一步的<mark>张量形状</mark>：形状是检查理解的最好工具，形状对不上，多半是哪里想错了。</p>
+
+  <h4>第一步：词嵌入 + 位置编码（编码器入口）</h4>
+
+  <p>「我 爱 你」3 个词先各查一次嵌入表（词表 37000 行，每行 512 维），得到 <code class="math">[3 × 512]</code> 的矩阵——3 个词，每个词一个 512 维向量。然后逐元素加上同样 <code class="math">[3 × 512]</code> 的正弦位置编码（<a href="#ch02" class="xref">第 2 章</a>），告诉模型谁在前谁在后。相加后形状仍是 <code class="math">[3 × 512]</code>。</p>
+
+  <h4>第二步：编码器栈，6 层精加工</h4>
+
+  <p>这个 <code class="math">[3 × 512]</code> 矩阵进入编码器第 1 层：多头自注意力（8 个头，每头 64 维，拼回去仍是 <code class="math">[3 × 512]</code>）→ Add &amp; Norm → FFN（512 → 2048 → 512）→ Add &amp; Norm。出第 1 层时形状仍是 <code class="math">[3 × 512]</code>——<strong>每一层都不改变形状，只改变内容</strong>。同样的层再叠 5 次。6 层走完，输出的 <code class="math">[3 × 512]</code> 就是那份「理解笔记」：每个词的向量里已经揉进了整句的上下文。把它记作 <code class="math">H</code>，它马上要被解码器反复查阅。</p>
+
+  <h4>第三步：解码器从一个起始符起步</h4>
+
+  <p>解码器也要吃东西才能开工。它的输入<mark>一开始只有一个起始符 <code>&lt;s&gt;</code></mark>（相当于「翻译开始」的信号）。查嵌入表、加位置编码，得到 <code class="math">[1 × 512]</code>。</p>
+
+  <h4>第四步：解码器第 1 层（三个子层依次过）</h4>
+
+  <ol>
+    <li><strong>掩码自注意力</strong>：目前只有 1 个词，没有「未来」可偷看，掩码不起作用，输出 <code class="math">[1 × 512]</code>。Add &amp; Norm。</li>
+    <li><strong>交叉注意力</strong>：Q 来自上一步的 <code class="math">[1 × 512]</code>，K、V 来自编码器笔记 <code class="math">H</code>（<code class="math">[3 × 512]</code>）。注意力分数矩阵是 <code class="math">[1 × 3]</code>——起始符对「我/爱/你」各分一份注意力，输出 <code class="math">[1 × 512]</code>。Add &amp; Norm。</li>
+    <li><strong>FFN</strong>：512 → 2048 → 512，输出仍是 <code class="math">[1 × 512]</code>。Add &amp; Norm。</li>
+  </ol>
+
+  <p>同样的 6 层全部走完，解码器输出一个 <code class="math">[1 × 512]</code> 的向量。</p>
+
+  <h4>第五步：线性层 + softmax，得到下一个词</h4>
+
+  <p>最后一步把这个 512 维向量交给<strong>线性层</strong>：一个 <code class="math">[512 × 37000]</code> 的权重矩阵，把 512 维「内部想法」投影成 37000 维——词表里每个词各得一个分数（logits，未归一化的原始分）。再过 <strong>softmax</strong> 变成概率分布：<code class="math">[1 × 37000]</code>，全部加起来等于 1。概率最高的那个词，就是这一步的输出——假设是「I」。</p>
+
+  <h4>第六步：把「I」拼回去，再来一轮</h4>
+
+  <p>解码器是典型的<mark>自回归</mark>（autoregressive）机器：把刚生成的「I」拼到输入末尾，得到「&lt;s&gt; I」（<code class="math">[2 × 512]</code>），整个流程重跑一遍：掩码自注意力（此时 2×2 的掩码矩阵开始起作用，「I」看不到未来）→ 交叉注意力（分数矩阵 <code class="math">[2 × 3]</code>）→ FFN → 6 层 → 线性层 → softmax → 取最后一个位置的概率分布，输出「love」。再拼回去得到「&lt;s&gt; I love」（<code class="math">[3 × 512]</code>），再来一轮输出「you」；再一轮，模型在「&lt;s&gt; I love you」之后输出结束符 <code>&lt;/s&gt;</code>，生成停止。翻译完成：</p>
+
+  <div class="formula">
+    我 爱 你 <span class="op">⟶</span> <span class="hl">I love you</span>
+  </div>
+
+  <div class="callout callout-info">
+    <p class="callout-title">训练时其实不用一轮一轮跑（教师强制）</p>
+    <p>上面描述的是<strong>推理</strong>时的真实生成过程。训练时因为有标准答案，会把整句「&lt;s&gt; I love you」一次性喂给解码器，靠因果掩码保证每个位置只看得到它左边的词，所有位置的预测<mark>并行</mark>算出——这就是「教师强制」（teacher forcing）。它和因果掩码是天生一对：掩码保证并行了也不会作弊。具体细节和损失计算见 <a href="#ch07" class="xref">第 7 章</a>。</p>
+  </div>
+
+  <p>下面这幅总览图把整条流水线压缩在一起。左侧是编码器通路（只跑 1 遍），右侧是解码器通路（每生成一个词跑 1 遍），每个模块旁边都标着进出的张量形状：</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 760 860" role="img" aria-label="机器翻译完整前向传播数据流图" font-family="inherit">
+      <defs>
+        <marker id="arr-06g" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--muted)"></path>
+        </marker>
+        <marker id="arr-06h" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--accent2)"></path>
+        </marker>
+        <marker id="arr-06i" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)"></path>
+        </marker>
+      </defs>
+
+      <!-- ============ 左：编码器通路（自下而上） ============ -->
+      <text x="150" y="30" text-anchor="middle" font-size="15" font-weight="700" fill="var(--accent)">编码器通路：只跑 1 遍</text>
+
+      <text x="150" y="838" text-anchor="middle" font-size="13" fill="var(--ink)">输入文本：「我 爱 你」</text>
+
+      <rect x="60" y="768" width="180" height="44" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="150" y="786" text-anchor="middle" font-size="12" fill="var(--ink)">词嵌入 + 位置编码</text>
+      <text x="150" y="803" text-anchor="middle" font-size="10" fill="var(--muted)">查表后逐元素相加 → [3×512]</text>
+      <line x1="150" y1="828" x2="150" y2="814" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06g)"></line>
+
+      <!-- 编码器层堆叠（画 3 块示意 6 层） -->
+      <rect x="60" y="640" width="180" height="42" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="150" y="658" text-anchor="middle" font-size="12" fill="var(--ink)">编码器层 6</text>
+      <text x="150" y="674" text-anchor="middle" font-size="10" fill="var(--muted)">自注意力 + FFN → [3×512]</text>
+      <line x1="150" y1="768" x2="150" y2="684" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06g)" stroke-dasharray="5 4"></line>
+
+      <rect x="60" y="590" width="180" height="42" rx="8" fill="var(--paper2)" stroke="var(--line)" stroke-dasharray="4 3"></rect>
+      <text x="150" y="608" text-anchor="middle" font-size="12" fill="var(--muted)">…（中间 4 层）</text>
+      <text x="150" y="624" text-anchor="middle" font-size="10" fill="var(--muted)">结构相同，参数各自独立</text>
+      <line x1="150" y1="640" x2="150" y2="634" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06g)"></line>
+
+      <rect x="60" y="540" width="180" height="42" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="150" y="558" text-anchor="middle" font-size="12" fill="var(--ink)">编码器层 1</text>
+      <text x="150" y="574" text-anchor="middle" font-size="10" fill="var(--muted)">多头自注意力 + Add&amp;Norm + FFN</text>
+      <line x1="150" y1="590" x2="150" y2="584" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06g)"></line>
+
+      <rect x="40" y="470" width="220" height="46" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"></rect>
+      <text x="150" y="490" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">理解笔记 H</text>
+      <text x="150" y="506" text-anchor="middle" font-size="10" fill="var(--muted)">编码器最终输出 [3×512]，只算这一次</text>
+      <line x1="150" y1="540" x2="150" y2="518" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06g)"></line>
+
+      <!-- ============ 右：解码器通路（自下而上） ============ -->
+      <text x="575" y="30" text-anchor="middle" font-size="15" font-weight="700" fill="var(--accent2)">解码器通路：每生成 1 个词跑 1 遍</text>
+
+      <text x="575" y="838" text-anchor="middle" font-size="13" fill="var(--ink)">已生成：&lt;s&gt;（下一轮是 &lt;s&gt; I，再下一轮是 &lt;s&gt; I love）</text>
+
+      <rect x="485" y="768" width="180" height="44" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="575" y="786" text-anchor="middle" font-size="12" fill="var(--ink)">词嵌入 + 位置编码</text>
+      <text x="575" y="803" text-anchor="middle" font-size="10" fill="var(--muted)">→ [1×512]（第 1 轮只有起始符）</text>
+      <line x1="575" y1="828" x2="575" y2="814" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06g)"></line>
+
+      <rect x="485" y="700" width="180" height="42" rx="8" fill="var(--paper2)" stroke="var(--accent2)"></rect>
+      <text x="575" y="718" text-anchor="middle" font-size="12" fill="var(--ink)">掩码自注意力</text>
+      <text x="575" y="734" text-anchor="middle" font-size="10" fill="var(--muted)">只看自己 → [1×512]　Add &amp; Norm</text>
+      <line x1="575" y1="768" x2="575" y2="744" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06g)"></line>
+
+      <rect x="485" y="630" width="180" height="44" rx="8" fill="var(--paper2)" stroke="var(--accent2)"></rect>
+      <text x="575" y="648" text-anchor="middle" font-size="12" fill="var(--ink)">交叉注意力</text>
+      <text x="575" y="664" text-anchor="middle" font-size="10" fill="var(--muted)">Q [1×512] × K、V [3×512] → 分数 [1×3]</text>
+      <line x1="575" y1="700" x2="575" y2="676" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06g)"></line>
+
+      <rect x="485" y="560" width="180" height="42" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="575" y="578" text-anchor="middle" font-size="12" fill="var(--ink)">FFN（512 → 2048 → 512）</text>
+      <text x="575" y="594" text-anchor="middle" font-size="10" fill="var(--muted)">→ [1×512]　Add &amp; Norm</text>
+      <line x1="575" y1="630" x2="575" y2="604" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06g)"></line>
+
+      <rect x="485" y="504" width="180" height="30" rx="8" fill="var(--paper2)" stroke="var(--line)" stroke-dasharray="4 3"></rect>
+      <text x="575" y="523" text-anchor="middle" font-size="11" fill="var(--muted)">… 同样三件套再叠 5 层（共 6 层）</text>
+      <line x1="575" y1="560" x2="575" y2="536" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06g)"></line>
+
+      <rect x="485" y="420" width="180" height="44" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="575" y="438" text-anchor="middle" font-size="12" fill="var(--ink)">线性层 [512 × 37000]</text>
+      <text x="575" y="454" text-anchor="middle" font-size="10" fill="var(--muted)">→ logits [1×37000]</text>
+      <line x1="575" y1="504" x2="575" y2="466" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06g)"></line>
+
+      <rect x="485" y="350" width="180" height="42" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="575" y="368" text-anchor="middle" font-size="12" fill="var(--ink)">Softmax</text>
+      <text x="575" y="384" text-anchor="middle" font-size="10" fill="var(--muted)">→ 概率分布 [1×37000]</text>
+      <line x1="575" y1="420" x2="575" y2="394" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06g)"></line>
+
+      <rect x="465" y="286" width="220" height="40" rx="10" fill="var(--accent2-soft)" stroke="var(--accent2)" stroke-width="1.5"></rect>
+      <text x="575" y="311" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">取概率最大的词 → 「I」</text>
+      <line x1="575" y1="350" x2="575" y2="328" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-06g)"></line>
+
+      <!-- 自回归回环 -->
+      <path d="M 685 306 L 735 306 L 735 790 L 667 790" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arr-06i)"></path>
+      <text x="742" y="540" font-size="11" fill="var(--accent)" transform="rotate(90 742 540)" text-anchor="middle">自回归回环：把「I」拼回输入，重跑 → love → you → &lt;/s&gt; 停止</text>
+
+      <!-- 交叉注意力：H 送往解码器每一层 -->
+      <path d="M 260 493 L 380 493 L 380 652 L 483 652" fill="none" stroke="var(--accent2)" stroke-width="2" marker-end="url(#arr-06h)"></path>
+      <text x="380" y="485" text-anchor="middle" font-size="11" fill="var(--accent2)">H 作为 K、V 的原料，送进解码器每一层的交叉注意力</text>
+    </svg>
+    <figcaption>图 6-4　「我爱你 → I love you」完整前向传播数据流。左侧编码器通路只跑 1 遍，产出理解笔记 H；右侧解码器通路每生成一个词跑 1 遍（自回归），每遍都是「掩码自注意力 → 交叉注意力 → FFN」× 6 层，最后线性层 + softmax 从 37000 个候选词里挑一个。括号里是第 1 轮（只有起始符）的张量形状，后续轮次解码器一侧的长度从 1 依次变成 2、3、4。</figcaption>
+  </figure>
+
+  <h3><span class="sec-no">6.6</span> 参数量手算：亲手数出 6500 万</h3>
+
+  <p>原论文摘要说 base 模型约 <strong>65M（6500 万）参数</strong>。这个数字怎么来的？我们自己数一遍。数参数有一个万能口诀：<strong>一个线性层的参数 = 输入维度 × 输出维度（权重矩阵），若带偏置再加输出维度</strong>。LayerNorm 每层只有缩放和平移两组小向量（各 512 个），位置编码是查表算出来的不算参数——这两样数量太小，下面统一忽略，专注大块头。约定：d_model = 512，d_ff = 2048，词表 37000，编码器 6 层 + 解码器 6 层。</p>
+
+  <h4>先数「一个多头注意力」的参数</h4>
+
+  <p>多头注意力内部有 4 个权重矩阵：W_Q、W_K、W_V（把输入投成查询、键、值）和 W_O（把 8 个头拼接后的结果投回 512 维）。注意<mark>每个头不单独存矩阵</mark>——8 头 × 64 维 = 512 维，所以 W_Q、W_K、W_V、W_O 每个都是 <code class="math">512 × 512</code>：</p>
+
+  <div class="formula">
+    一个注意力 = <span class="hl">4 × 512 × 512</span> = 4 × 262,144 = <span class="hl">1,048,576</span>
+  </div>
+
+  <p>（这个结论对自注意力和交叉注意力<mark>都成立</mark>：交叉注意力的 K、V 投影输入是编码器的 512 维向量，输出仍是 512 维，所以还是 512×512。）</p>
+
+  <h4>再数「一个 FFN」的参数</h4>
+
+  <p>FFN 是两个线性层：512 → 2048，再 2048 → 512（<a href="#ch05" class="xref">第 5 章</a>）：</p>
+
+  <div class="formula">
+    一个 FFN = 512×2048 + 2048×512 = <span class="hl">2 × 512 × 2048</span> = 2,097,152
+  </div>
+
+  <p>下面各表「忽略偏置」一列按上面的纯权重数；「含偏置」一列加上偏置：注意力每个矩阵带 512 个偏置（4 × 512 = 2,048），FFN 第一层带 2048 个、第二层带 512 个（共 2,560）。两者都会给出，最后对比你会发现偏置的影响小到可以忽略。</p>
+
+  <h4>组装成层、组装成塔</h4>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>部件</th><th>算法</th><th>参数量（忽略偏置）</th><th>含偏置</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>多头注意力（自/交叉通用）</td><td>4 × 512 × 512</td><td>1,048,576</td><td>+2,048 → 1,050,624</td></tr>
+        <tr><td>FFN</td><td>2 × 512 × 2048</td><td>2,097,152</td><td>+2,560 → 2,099,712</td></tr>
+        <tr><td><strong>一个编码器层</strong>（注意力 ×1 + FFN ×1）</td><td>1,048,576 + 2,097,152</td><td><strong>3,145,728 ≈ 3.15M</strong></td><td>3,150,336</td></tr>
+        <tr><td><strong>一个解码器层</strong>（掩码注意力 + 交叉注意力 + FFN）</td><td>3,145,728 + 1,048,576</td><td><strong>4,194,304 ≈ 4.19M</strong></td><td>4,200,960</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>解码器每层比编码器<mark>恰好多一个交叉注意力</mark>，也就是恰好多 1,048,576 个参数——这和我们前面的结构图完全对上。</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>模块</th><th>算法</th><th>参数量</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>编码器栈</td><td>6 × 3,145,728</td><td>18,874,368 ≈ 18.9M</td></tr>
+        <tr><td>解码器栈</td><td>6 × 4,194,304</td><td>25,165,824 ≈ 25.2M</td></tr>
+        <tr><td>词嵌入表</td><td>37,000 × 512</td><td>18,944,000 ≈ 18.9M</td></tr>
+        <tr><td>输出线性层</td><td colspan="2"><strong>与嵌入表共享同一组权重</strong>（原论文做法：输出投影就是嵌入矩阵的转置，参数量为 0 新增）</td></tr>
+        <tr><td><strong>合计（忽略偏置）</strong></td><td>18,874,368 + 25,165,824 + 18,944,000</td><td><strong>62,984,192 ≈ 63M</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>62,984,192，约 63M。论文报的 65M 与我们的手算差约 2M——如果把所有偏置、LayerNorm 参数、词表和分词粒度的细微差别（论文是英德/英法两套任务共用配置，词表实际是共享源目标词表的 BPE 子词）都算进去，正好落在这个区间。<mark>我们手算的 63M 与论文的 65M 吻合</mark>，说明结构理解没有出错。</p>
+
+  <div class="callout callout-tip">
+    <p class="callout-title">从这个数字里读出两个结论</p>
+    <p>① <strong>词嵌入占了近三分之一</strong>（18.9M / 63M ≈ 30%）。词表越大嵌入越胖，这就是为什么现代模型做「权重共享」（输入嵌入和输出投影共用一份）很划算。② <strong>FFN 才是真正的参数大户</strong>：单看一个编码器层，FFN（2.1M）是注意力（1.05M）的两倍。注意力很出风头，但参数和算力的大头其实在 FFN。</p>
+  </div>
+
+  <div class="demo-frame" data-demo="demo-architecture">正在加载交互演示…</div>
+
+  <h3><span class="sec-no">6.7</span> 小结</h3>
+  <ul>
+    <li>完整 Transformer = 编码器栈 ×6（多头自注意力 + FFN）+ 解码器栈 ×6（<mark>掩码</mark>自注意力 + <mark>交叉</mark>注意力 + FFN）+ 线性层 + softmax。每层之间都有 Add &amp; Norm。</li>
+    <li>掩码自注意力：在 softmax 前给分数矩阵上三角加 −∞，让位置 i 只能看位置 ≤ i 的词，防止训练时「偷看答案」。形状不变，只是「贴了封条」。</li>
+    <li>交叉注意力：Q 来自解码器、K/V 来自编码器最终输出，分数矩阵形状是 [译文长 × 原文长]，天然支持不等长序列，是左右两半之间唯一的桥。</li>
+    <li>完整走查：「我爱你」[3×512] 过编码器 6 层得到笔记 H；解码器从 &lt;s&gt; 起步，逐词生成 I → love → you，每步重跑全部 6 层，softmax 从 37000 词里挑一个，直到输出 &lt;/s&gt;。</li>
+    <li>参数量手算：注意力 4×512×512 = 1,048,576；FFN 2×512×2048 = 2,097,152；编码器层 ≈ 3.15M，解码器层 ≈ 4.19M；6 + 6 层加嵌入表 18,944,000，合计 ≈ 63M，与论文 65M 吻合。输出层与嵌入共享权重。</li>
+  </ul>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">常见误区</p>
+    <ul>
+      <li><strong>「编码器和解码器各只有一层，画 6 个只是示意」</strong>——错。是 6 个参数各自独立的层串行堆叠，数据要依次流过全部 6 层；「×6」是真实结构，不是画法。</li>
+      <li><strong>「掩码只在推理时需要」</strong>——恰恰相反。掩码主要解决的是<strong>训练</strong>时的问题（教师强制下整句答案都在输入里，不挡住未来就会作弊）；推理时未来词本来不存在，掩码自然成立。</li>
+      <li><strong>「交叉注意力的 K、V 每层都要让编码器重算」</strong>——不需要。编码器输出 H 只算一次，被送进解码器每一层；每层只是用自己的 W_K、W_V 对同一份 H 做投影。</li>
+      <li><strong>「参数量大头是注意力」</strong>——不是。单层里 FFN（2.1M）是注意力（1.05M）的两倍，全模型还有近三分之一在词嵌入表里。注意力是「大脑皮层」，FFN 和嵌入才是「体重」。</li>
+    </ul>
+  </div>
+
+  <h3><span class="sec-no">6.8</span> 自测题</h3>
+
+  <details class="quiz">
+    <summary>第 1 题：为什么掩码是在 softmax 之前把分数加成 −∞，而不是在 softmax 之后把对应概率直接改成 0？</summary>
+    <p><strong>参考答案：</strong>softmax 之后每行概率和为 1，如果直接把若干格改成 0，剩下的格子之和就不再是 1，还得重新归一化——等于把 softmax 重算一遍，多此一举。在 softmax 之前加 −∞，则 e^(−∞) = 0，softmax 内部天然完成「被封格归零 + 其余格重新归一化」两件事，一次运算搞定，而且全程是整齐的矩阵运算，GPU 友好。</p>
+  </details>
+
+  <details class="quiz">
+    <summary>第 2 题：交叉注意力里，源句 10 个词、译文目前生成了 4 个词，d_model = 512。问：注意力分数矩阵是什么形状？输出是什么形状？</summary>
+    <p><strong>参考答案：</strong>分数矩阵是 <strong>[4 × 10]</strong>（译文 4 个位置各自对源句 10 个位置打分，每头一个这样的矩阵）。每个头的 V 是 [10 × 64]，加权求和后每头输出 [4 × 64]，8 个头拼接成 [4 × 512]，再过 W_O 仍是 [4 × 512]——输出长度跟随 Q 的一侧（译文），内容来自 V 的一侧（源句）。</p>
+  </details>
+
+  <details class="quiz">
+    <summary>第 3 题：如果把 d_ff 从 2048 改成 4096（其他不变），一个编码器层的参数量变成多少？全模型（6+6 层、嵌入 18,944,000）大约变成多少？</summary>
+    <p><strong>参考答案：</strong>FFN 变为 2 × 512 × 4096 = 4,194,304；注意力不变（1,048,576），编码器层 = 5,242,880；解码器层 = 5,242,880 + 1,048,576 = 6,291,456。全模型 ≈ 6 × 5,242,880 + 6 × 6,291,456 + 18,944,000 = 31,457,280 + 37,748,736 + 18,944,000 = 88,150,016 ≈ <strong>88M</strong>。可见 FFN 翻倍让总参数涨了约 40%——调 d_ff 是「买参数」最贵的方式之一。</p>
+  </details>
+
+</section>

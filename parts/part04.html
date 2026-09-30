@@ -1,0 +1,356 @@
+<section class="chapter" id="ch04">
+  <header class="ch-head">
+    <p class="ch-eyebrow">第 4 章 · 多头注意力</p>
+    <h2>多头注意力：一次会议，八位评审</h2>
+    <p class="ch-lede">第 3 章的注意力只有"一组 Q、K、V"，它一次只能按一种标准衡量相关。可一句话里词与词之间同时存在语法、指代、位置等好几种关系，一种标准看不过来。本章用"评审团"类比建立直觉，然后把原论文 <code class="math">d_model=512</code>、<code class="math">h=8</code> 的真实数字从头到尾推一遍，最后用一个 <code class="math">d_model=4</code>、两个头的迷你例子亲手算完整个流程。读完你会明白：多头不是"八次重复劳动"，而是"八份分工合作"。</p>
+  </header>
+
+  <h3>4.1 为什么一组 Q、K、V 不够用</h3>
+  <p>先看一个句子，数数"口渴"这个词和别的词之间有多少种关系：</p>
+  <div class="formula">动物们 跨过 河流 ， 因为 它们 口渴</div>
+  <ul>
+    <li><strong>语法关系</strong>："跨过"是动词，它的主语是"动物们"，宾语是"河流"——这是句法结构上的搭配。</li>
+    <li><strong>指代关系</strong>："它们"指谁？得回头看"动物们"。这和语法搭配是<strong>另一种</strong>相关标准。</li>
+    <li><strong>位置关系</strong>：中文里修饰语往往挨着被修饰的词，"跨过"的下一位是"河流"很正常——相邻本身就是一种信息。</li>
+    <li><strong>因果/逻辑关系</strong>："因为"后面的"口渴"解释了前面"跨过"的原因，这是一种跨越半个句子的远距离呼应。</li>
+  </ul>
+  <p>问题在于：<a href="#ch03" class="xref">第 3 章</a>的注意力机制里，相关度只有一种算法——<code class="math">softmax(QKᵀ/√d_k)</code>。一组 <code class="math"><b>W</b><sub>Q</sub>、<b>W</b><sub>K</sub></code> 只能定义<mark>一种"什么叫相关"</mark>。好比用同一把尺子，你没法同时量长度、称重量、测温度。如果这组权重学会了"指代关系"的度量标准，它在"主谓搭配"上就必然是外行；一个词的注意力预算（每行和为 1）还得在这几种需求之间挤来挤去，最后每种关系都看得不痛快。</p>
+  <p>原论文的解法朴素而有效：<strong>既然一种标准不够，那就准备八种标准，让它们并行干活</strong>。这就是<mark>多头注意力（Multi-Head Attention）</mark>。</p>
+
+  <h3>4.2 直觉类比：一次会议，多位评审</h3>
+  <p>把理解一个句子想象成评审一篇投稿论文。会议主席只请一位评审，行不行？行，但风险很大——这位评审得同时判断：选题新不新、实验扎实不扎实、写作清不清楚、和会议主题合不合。一个人再强，一套标准也只能突出一个侧面，顾此失彼。</p>
+  <p>现实中的做法是请一个<mark>评审团</mark>：</p>
+  <ol>
+    <li><strong>分工</strong>：每位评审只负责一个侧面。甲专看创新性，乙专看实验，丙专看写作，丁专看领域契合度。</li>
+    <li><strong>独立评审</strong>：他们各自读同一篇论文，互不干扰，各写各的意见。</li>
+    <li><strong>汇总</strong>：会议主席把八份意见按顺序钉在一起，再通读一遍，写出一句话总评。</li>
+  </ol>
+  <p>多头注意力就是这套流程的数学版：</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>评审团里的角色</th><th>多头注意力里的角色</th><th>对应记号</th></tr></thead>
+      <tbody>
+        <tr><td>一篇投稿论文</td><td>输入序列（所有词向量）</td><td><code class="math"><b>X</b> [n×512]</code></td></tr>
+        <tr><td>第 i 位评审的"评审视角"</td><td>第 i 个头自己的三顶帽子</td><td><code class="math"><b>W</b><sub>Q</sub>ⁱ、<b>W</b><sub>K</sub>ⁱ、<b>W</b><sub>V</sub>ⁱ</code></td></tr>
+        <tr><td>第 i 位评审写的意见</td><td>第 i 个头的注意力输出</td><td><code class="math">headᵢ [n×64]</code></td></tr>
+        <tr><td>把 8 份意见钉成一份长材料</td><td>拼接（Concat）8 个头的输出</td><td><code class="math">[n×512]</code></td></tr>
+        <tr><td>主席通读后写总评</td><td>输出投影矩阵</td><td><code class="math"><b>W</b><sub>O</sub> [512×512]</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>有两个细节是这一类比里最值得带走的：</p>
+  <ul>
+    <li><strong>每位评审拿到的不是论文全文，而是自己视角的"缩印版"。</strong>每个头先把 512 维的词向量投影到 64 维——相当于评审只摘抄自己关心的侧面。这样 8 个头的总视野（8 × 64 = 512）恰好等于原文长度，没有重复浪费。</li>
+    <li><strong>评审们不是事前被指派好分工的，而是在训练中自发分化出来的。</strong>模型初始化时 8 个头几乎一样，是梯度下降让它们逐渐各管一摊（4.5 节有具体观察）。这一点比类比本身还要美妙：<mark>分工是被"学"出来的，不是被"设计"出来的</mark>。</li>
+  </ul>
+  <div class="callout callout-info">
+    <p class="callout-title">原论文的一句话公式</p>
+    <p>MultiHead(Q,K,V) = Concat(head₁, …, headₕ) <b>W</b><sub>O</sub>，其中 headᵢ = Attention(<b>X</b><b>W</b><sub>Q</sub>ⁱ, <b>X</b><b>W</b><sub>K</sub>ⁱ, <b>X</b><b>W</b><sub>V</b>ⁱ)。每个 headᵢ 内部就是第 3 章那套 softmax(QKᵀ/√d_k)V，一步不多、一步不少。</p>
+  </div>
+
+  <h3>4.3 完整维度推导：6 个词走一遍数据流水线</h3>
+  <p>现在把类比换成数字。取原论文 base 模型的真实配置：<code class="math">d_model=512</code>、头数 <code class="math">h=8</code>、每头 <code class="math">d_k=d_v=64</code>。假设句子有 6 个词（比如上面那句去掉标点），输入矩阵 <code class="math"><b>X</b></code> 的形状是 <code class="math">[6×512]</code>。</p>
+  <p>整个多头注意力分五步走完：</p>
+  <ol>
+    <li><strong>每个头做自己的投影</strong>。第 i 个头持有三个权重矩阵 <code class="math"><b>W</b><sub>Q</sub>ⁱ、<b>W</b><sub>K</sub>ⁱ、<b>W</b><sub>V</sub>ⁱ</code>，形状都是 <code class="math">[512×64]</code>。于是 <code class="math"><b>Q</b><sub>i</sub> = <b>X</b><b>W</b><sub>Q</sub>ⁱ</code> 得到 <code class="math">[6×64]</code>，K、V 同理。8 个头一共 24 个权重矩阵，各自独立学习。</li>
+    <li><strong>每个头独立算注意力</strong>。第 i 个头内部：<code class="math"><b>Q</b><sub>i</sub><b>K</b><sub>i</sub>ᵀ</code> 得 <code class="math">[6×6]</code> 的分数矩阵，除以 <code class="math">√64 = 8</code>，逐行 softmax 得权重矩阵 <code class="math"><b>A</b><sub>i</sub> [6×6]</code>，再乘 <code class="math"><b>V</b><sub>i</sub></code> 得输出 <code class="math">headᵢ [6×64]</code>。</li>
+    <li><strong>8 个头并行，互不通信</strong>。得到 8 份输出，每份都是 <code class="math">[6×64]</code>。</li>
+    <li><strong>拼接（Concat）</strong>。把 8 份 <code class="math">[6×64]</code> 沿"特征维度"横着粘起来：<code class="math">64×8 = 512</code>，得到 <code class="math">[6×512]</code>——恰好恢复原宽度。</li>
+    <li><strong>输出投影</strong>。拼接结果乘 <code class="math"><b>W</b><sub>O</sub> [512×512]</code>，得到最终输出 <code class="math">[6×512]</code>。这一步是"主席写总评"：8 份意见不是简单罗列，而是再混合、再提炼一次，各头的信息在这里第一次互相交流。</li>
+  </ol>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>步骤</th><th>运算</th><th>形状变化</th><th>评审团类比</th></tr></thead>
+      <tbody>
+        <tr><td>输入</td><td>嵌入 + 位置编码</td><td><code class="math">[6×512]</code></td><td>论文全文</td></tr>
+        <tr><td>① 投影 ×8</td><td><code class="math"><b>Q</b><sub>i</sub>=<b>X</b><b>W</b><sub>Q</sub>ⁱ</code> 等</td><td><code class="math">[6×512]×[512×64] → [6×64]</code> ×8</td><td>8 位评审各摘抄自己的侧面</td></tr>
+        <tr><td>② 注意力 ×8</td><td><code class="math">softmax(<b>Q</b><sub>i</sub><b>K</b><sub>i</sub>ᵀ/8)<b>V</b><sub>i</sub></code></td><td><code class="math">[6×64] → [6×64]</code> ×8</td><td>8 份独立意见</td></tr>
+        <tr><td>③ 拼接</td><td>Concat(head₁…head₈)</td><td><code class="math">8×[6×64] → [6×512]</code></td><td>钉成一份长材料</td></tr>
+        <tr><td>④ 输出投影</td><td>乘 <code class="math"><b>W</b><sub>O</sub></code></td><td><code class="math">[6×512]×[512×512] → [6×512]</code></td><td>主席总评</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <figure class="fig">
+    <svg viewBox="0 0 760 420" font-family="inherit" role="img" aria-label="多头注意力数据流图">
+      <defs>
+        <marker id="arr-04" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+      <!-- 输入 -->
+      <rect x="20" y="170" width="96" height="80" rx="10" fill="var(--paper2)" stroke="var(--line)"/>
+      <text x="68" y="204" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">X</text>
+      <text x="68" y="224" text-anchor="middle" font-size="12" fill="var(--muted)">[6 × 512]</text>
+      <!-- 分出三个头示例 -->
+      <line x1="116" y1="210" x2="176" y2="90" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-04)"/>
+      <line x1="116" y1="210" x2="176" y2="210" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-04)"/>
+      <line x1="116" y1="210" x2="176" y2="330" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-04)"/>
+      <!-- 头1 -->
+      <rect x="180" y="48" width="150" height="84" rx="10" fill="var(--paper2)" stroke="var(--accent)" stroke-width="1.6"/>
+      <text x="255" y="72" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent)">头 1</text>
+      <text x="255" y="92" text-anchor="middle" font-size="11.5" fill="var(--ink)">Q₁ K₁ V₁ [6×64]</text>
+      <text x="255" y="110" text-anchor="middle" font-size="11" fill="var(--muted)">softmax(Q₁K₁ᵀ/8)V₁</text>
+      <!-- 头2 -->
+      <rect x="180" y="168" width="150" height="84" rx="10" fill="var(--paper2)" stroke="var(--accent2)" stroke-width="1.6"/>
+      <text x="255" y="192" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent2)">头 2</text>
+      <text x="255" y="212" text-anchor="middle" font-size="11.5" fill="var(--ink)">Q₂ K₂ V₂ [6×64]</text>
+      <text x="255" y="230" text-anchor="middle" font-size="11" fill="var(--muted)">各算各的注意力</text>
+      <!-- 省略 -->
+      <text x="255" y="292" text-anchor="middle" font-size="20" fill="var(--muted)">⋮</text>
+      <!-- 头8 -->
+      <rect x="180" y="308" width="150" height="84" rx="10" fill="var(--paper2)" stroke="var(--accent3)" stroke-width="1.6"/>
+      <text x="255" y="332" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent3)">头 8</text>
+      <text x="255" y="352" text-anchor="middle" font-size="11.5" fill="var(--ink)">Q₈ K₈ V₈ [6×64]</text>
+      <text x="255" y="370" text-anchor="middle" font-size="11" fill="var(--muted)">8 个头并行</text>
+      <!-- 头到拼接 -->
+      <line x1="330" y1="90" x2="412" y2="176" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-04)"/>
+      <line x1="330" y1="210" x2="412" y2="200" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-04)"/>
+      <line x1="330" y1="350" x2="412" y2="226" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-04)"/>
+      <text x="370" y="120" font-size="10.5" fill="var(--muted)">head₁ [6×64]</text>
+      <text x="368" y="320" font-size="10.5" fill="var(--muted)">head₈ [6×64]</text>
+      <!-- 拼接 -->
+      <rect x="416" y="160" width="120" height="100" rx="10" fill="var(--paper2)" stroke="var(--line)"/>
+      <text x="476" y="196" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">Concat 拼接</text>
+      <text x="476" y="218" text-anchor="middle" font-size="11.5" fill="var(--muted)">8 × 64 = 512</text>
+      <text x="476" y="238" text-anchor="middle" font-size="11.5" fill="var(--ink)">[6 × 512]</text>
+      <!-- 拼接到 WO -->
+      <line x1="536" y1="210" x2="586" y2="210" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-04)"/>
+      <!-- WO -->
+      <rect x="590" y="160" width="120" height="100" rx="10" fill="var(--paper2)" stroke="var(--line)"/>
+      <text x="650" y="196" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">W_O 混合</text>
+      <text x="650" y="218" text-anchor="middle" font-size="11.5" fill="var(--muted)">[512 × 512]</text>
+      <text x="650" y="238" text-anchor="middle" font-size="11.5" fill="var(--ink)">输出 [6 × 512]</text>
+      <!-- 标注 -->
+      <text x="20" y="30" font-size="12.5" fill="var(--muted)">每个头先把 512 维"缩印"成 64 维（X·W_Qⁱ，W_Qⁱ 为 [512×64]），独立做完一次完整注意力</text>
+      <text x="20" y="406" font-size="12.5" fill="var(--muted)">拼接恢复 512 维后，再经 W_O 把 8 份意见混合提炼——各头信息在此首次汇合</text>
+    </svg>
+    <figcaption>图 4-1　多头注意力的数据流：X[6×512] 分给 8 个头，各投影到 [6×64] 独立计算，拼接回 [6×512]，最后乘 W_O 输出。注意进出形状相同——多头注意力不改变张量形状，只更新内容。</figcaption>
+  </figure>
+  <p>数一下参数量，心里有数：8 个头 × 3 个矩阵 × (512×64) = 786,432 个，加上 <code class="math"><b>W</b><sub>O</sub></code> 的 512×512 = 262,144 个，一个多头注意力层共 <strong>1,048,576 个参数</strong>，约 105 万。原论文 base 模型有 6 层编码器 × 6 层解码器，每层都有这么一套——等学到<a href="#ch06" class="xref">第 6 章</a>亲手算 65M 总参数时，这部分会占大头。</p>
+  <div class="callout callout-tip">
+    <p class="callout-title">为什么 d_k 恰好是 64？</p>
+    <p>不是玄学，就是除法：<code class="math">d_k = d_v = d_model / h = 512 / 8 = 64</code>。把 512 维平分给 8 个头，每头 64 维。这样设计的关键好处在下一节：<strong>总计算量和一个"满血"单头几乎一样</strong>。</p>
+  </div>
+
+  <h3>4.4 计算量分析：8 个头并不比 1 个头贵</h3>
+  <p>很多人第一反应是："8 个头，是不是计算量也变 8 倍？"不是。直觉错在忽略了"每个头变瘦了"这件事。我们把两边的大矩阵乘法逐项数一遍（以 n 个词为例，只数乘加的量级）：</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>运算</th><th>单头（d_k=512）</th><th>8 头（每头 d_k=64）</th></tr></thead>
+      <tbody>
+        <tr><td>Q/K/V 投影</td><td>3 × n·512·512</td><td>8 × 3 × n·512·64 = 3 × n·512·512</td></tr>
+        <tr><td>QKᵀ 打分</td><td>n²·512</td><td>8 × n²·64 = n²·512</td></tr>
+        <tr><td>A·V 加权</td><td>n²·512</td><td>8 × n²·64 = n²·512</td></tr>
+        <tr><td>输出投影</td><td>（可不设）</td><td>n·512·512（多出来的一项）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>关键就在这一行算式：<code class="math">8 × 64 = 512</code>。<mark>头数乘 8 倍，每头维度除 8，两个因子恰好抵消</mark>。所以 8 头注意力的主体计算量与"单个 512 维的头"基本持平，唯一的额外开销是最后的 <code class="math"><b>W</b><sub>O</sub></code> 投影（n·512·512 次乘加），相对总量只是个零头。</p>
+  <div class="cols-2">
+    <div class="big-number"><div class="bn-v">8 × 64</div><div class="bn-k">= 512：头数与头维度互相抵消，总计算量几乎不变</div></div>
+    <div class="big-number"><div class="bn-v">1 项</div><div class="bn-k">额外开销：仅多一个 W_O 输出投影，量级可忽略</div></div>
+  </div>
+  <p>换句话说，多头机制是<strong>几乎免费的午餐</strong>：花差不多的钱，买到 8 种不同的"相关标准"。这也是为什么从 2017 年到现在，几乎所有 Transformer 都保留了多头设计——后续变体（如第 9 章会提到的 GQA）改的不是"要不要多头"，而是"K、V 要不要让每个头各备一份"。</p>
+
+  <h3>4.5 不同的头真的学到了不同模式吗</h3>
+  <p>理论说 8 个头"可以"分工，但训练完之后它们"真的"分工了吗？这是可解释性研究里最直观的一类发现。研究者们把训练好的模型（原论文的英德翻译模型、后来的 BERT 等）的注意力矩阵画成热力图逐头观察，<mark>观察显示，不同的头往往呈现出稳定而互不相同的几何图案</mark>：</p>
+  <ul>
+    <li><strong>位置型</strong>：权重集中在对角线旁边一格——每个词主要看自己的前一个或后一个词，像在玩"传话"的局部版本。这类头在不少层里都会出现，对角线条带非常醒目。</li>
+    <li><strong>句法型</strong>：动词那一行把大块权重分给它的主语、宾语；修饰词那一行指向被修饰的中心词。整张图看起来稀稀拉拉但"每条线都有语法道理"。</li>
+    <li><strong>指代型</strong>：代词（"它""它们"）那一行，权重尖峰落在其指代的名词上——正是 4.1 节那种"往回瞟一眼"的动作。</li>
+    <li><strong>锚点型 / 特殊符号型</strong>：几乎所有词都把一部分权重丢给句首词或标点，热力图上出现一条"竖直的亮线"。一种常见解读是：当这个词"没什么特别想看的"时，就把注意力停在一个无害的固定锚点上。</li>
+    <li><strong>平均型</strong>：权重接近均匀分布，相当于对全句做一次"模糊的全局摘要"。</li>
+  </ul>
+  <p>需要把分寸说清楚：这些是对真实模型的<strong>经验观察</strong>，用词应该是"往往""常见"，而不是"必然"。没有哪个头被强制规定只能看指代；同一个头在不同句子里也会呈现混合模式；而且并不是每个头都那么好解读，总有一两个头看起来"意义不明"，研究界对此至今仍在讨论。但大方向是可靠的：<mark>从头初始化几乎相同的 8 个头，训练后自发分化出了不同职能</mark>——这正是评审团类比里最妙的那一点。</p>
+  <figure class="fig">
+    <svg viewBox="0 0 760 300" font-family="inherit" role="img" aria-label="八个头的注意力模式对比小热图">
+      <defs>
+        <marker id="arr-04-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+      <!-- 头1 位置型(看前一个词)：次对角线条带 -->
+      <g>
+        <rect x="20" y="40" width="120" height="120" fill="var(--paper2)" stroke="var(--line)"/>
+        <rect x="20" y="40" width="24" height="24" fill="var(--accent)" opacity="0.9"/>
+        <rect x="20" y="64" width="24" height="24" fill="var(--accent)" opacity="0.9"/>
+        <rect x="44" y="88" width="24" height="24" fill="var(--accent)" opacity="0.9"/>
+        <rect x="68" y="112" width="24" height="24" fill="var(--accent)" opacity="0.9"/>
+        <rect x="92" y="136" width="24" height="24" fill="var(--accent)" opacity="0.9"/>
+        <rect x="44" y="64" width="24" height="24" fill="var(--accent)" opacity="0.25"/>
+        <rect x="68" y="88" width="24" height="24" fill="var(--accent)" opacity="0.25"/>
+        <rect x="92" y="112" width="24" height="24" fill="var(--accent)" opacity="0.25"/>
+        <rect x="116" y="136" width="24" height="24" fill="var(--accent)" opacity="0.25"/>
+        <text x="80" y="180" text-anchor="middle" font-size="12" fill="var(--ink)">头 1：盯前一个词</text>
+        <text x="80" y="198" text-anchor="middle" font-size="10.5" fill="var(--muted)">次对角线条带</text>
+      </g>
+      <!-- 头2 句法型：动词行指向主语/宾语 -->
+      <g>
+        <rect x="200" y="40" width="120" height="120" fill="var(--paper2)" stroke="var(--line)"/>
+        <rect x="200" y="64" width="24" height="24" fill="var(--accent2)" opacity="0.85"/>
+        <rect x="248" y="64" width="24" height="24" fill="var(--accent2)" opacity="0.7"/>
+        <rect x="224" y="88" width="24" height="24" fill="var(--accent2)" opacity="0.5"/>
+        <rect x="296" y="88" width="24" height="24" fill="var(--accent2)" opacity="0.4"/>
+        <rect x="200" y="112" width="24" height="24" fill="var(--accent2)" opacity="0.4"/>
+        <rect x="248" y="136" width="24" height="24" fill="var(--accent2)" opacity="0.5"/>
+        <text x="260" y="180" text-anchor="middle" font-size="12" fill="var(--ink)">头 2：句法搭配</text>
+        <text x="260" y="198" text-anchor="middle" font-size="10.5" fill="var(--muted)">动词行找主语宾语</text>
+      </g>
+      <!-- 头3 指代型：某行孤点 -->
+      <g>
+        <rect x="380" y="40" width="120" height="120" fill="var(--paper2)" stroke="var(--line)"/>
+        <rect x="380" y="136" width="24" height="24" fill="var(--accent3)" opacity="0.9"/>
+        <rect x="404" y="136" width="24" height="24" fill="var(--accent3)" opacity="0.15"/>
+        <rect x="428" y="136" width="24" height="24" fill="var(--accent3)" opacity="0.1"/>
+        <rect x="452" y="136" width="24" height="24" fill="var(--accent3)" opacity="0.1"/>
+        <rect x="476" y="136" width="24" height="24" fill="var(--accent3)" opacity="0.15"/>
+        <text x="440" y="180" text-anchor="middle" font-size="12" fill="var(--ink)">头 3：指代回溯</text>
+        <text x="440" y="198" text-anchor="middle" font-size="10.5" fill="var(--muted)">"它"那行锁定名词</text>
+      </g>
+      <!-- 头4 锚点型：竖直亮线 -->
+      <g>
+        <rect x="560" y="40" width="120" height="120" fill="var(--paper2)" stroke="var(--line)"/>
+        <rect x="560" y="40" width="24" height="24" fill="var(--accent)" opacity="0.75"/>
+        <rect x="560" y="64" width="24" height="24" fill="var(--accent)" opacity="0.75"/>
+        <rect x="560" y="88" width="24" height="24" fill="var(--accent)" opacity="0.75"/>
+        <rect x="560" y="112" width="24" height="24" fill="var(--accent)" opacity="0.75"/>
+        <rect x="560" y="136" width="24" height="24" fill="var(--accent)" opacity="0.75"/>
+        <text x="620" y="180" text-anchor="middle" font-size="12" fill="var(--ink)">头 4：句首锚点</text>
+        <text x="620" y="198" text-anchor="middle" font-size="10.5" fill="var(--muted)">一条竖直亮线</text>
+      </g>
+      <!-- 下排 -->
+      <!-- 头5 自关注：主对角线 -->
+      <g>
+        <rect x="20" y="216" width="120" height="120" fill="var(--paper2)" stroke="var(--line)" transform="translate(0,20)"/>
+        <rect x="20" y="236" width="24" height="24" fill="var(--accent2)" opacity="0.85"/>
+        <rect x="44" y="260" width="24" height="24" fill="var(--accent2)" opacity="0.85"/>
+        <rect x="68" y="284" width="24" height="24" fill="var(--accent2)" opacity="0.85"/>
+        <rect x="92" y="308" width="24" height="24" fill="var(--accent2)" opacity="0.85"/>
+        <rect x="116" y="332" width="24" height="24" fill="var(--accent2)" opacity="0.85"/>
+        <text x="80" y="256" text-anchor="middle" font-size="12" fill="var(--ink)" transform="translate(0,120)">头 5：自关注</text>
+        <text x="80" y="274" text-anchor="middle" font-size="10.5" fill="var(--muted)" transform="translate(0,120)">主对角线</text>
+      </g>
+      <!-- 头6 平均型 -->
+      <g>
+        <rect x="200" y="236" width="120" height="120" fill="var(--accent3)" opacity="0.22" stroke="var(--line)"/>
+        <text x="260" y="376" text-anchor="middle" font-size="12" fill="var(--ink)">头 6：均匀平均</text>
+        <text x="260" y="394" text-anchor="middle" font-size="10.5" fill="var(--muted)">全局模糊摘要</text>
+      </g>
+      <!-- 头7 跨句呼应：两个远点 -->
+      <g>
+        <rect x="380" y="236" width="120" height="120" fill="var(--paper2)" stroke="var(--line)"/>
+        <rect x="476" y="236" width="24" height="24" fill="var(--accent)" opacity="0.8"/>
+        <rect x="380" y="332" width="24" height="24" fill="var(--accent)" opacity="0.8"/>
+        <text x="440" y="376" text-anchor="middle" font-size="12" fill="var(--ink)">头 7：远距离呼应</text>
+        <text x="440" y="394" text-anchor="middle" font-size="10.5" fill="var(--muted)">首尾互相看</text>
+      </g>
+      <!-- 头8 局部窗口：对角线宽带 -->
+      <g>
+        <rect x="560" y="236" width="120" height="120" fill="var(--paper2)" stroke="var(--line)"/>
+        <rect x="560" y="236" width="24" height="24" fill="var(--accent3)" opacity="0.8"/>
+        <rect x="584" y="236" width="24" height="24" fill="var(--accent3)" opacity="0.4"/>
+        <rect x="584" y="260" width="24" height="24" fill="var(--accent3)" opacity="0.8"/>
+        <rect x="560" y="260" width="24" height="24" fill="var(--accent3)" opacity="0.4"/>
+        <rect x="608" y="260" width="24" height="24" fill="var(--accent3)" opacity="0.4"/>
+        <rect x="608" y="284" width="24" height="24" fill="var(--accent3)" opacity="0.8"/>
+        <rect x="584" y="284" width="24" height="24" fill="var(--accent3)" opacity="0.4"/>
+        <rect x="632" y="284" width="24" height="24" fill="var(--accent3)" opacity="0.4"/>
+        <rect x="632" y="308" width="24" height="24" fill="var(--accent3)" opacity="0.8"/>
+        <rect x="608" y="308" width="24" height="24" fill="var(--accent3)" opacity="0.4"/>
+        <rect x="656" y="308" width="24" height="24" fill="var(--accent3)" opacity="0.4"/>
+        <rect x="656" y="332" width="24" height="24" fill="var(--accent3)" opacity="0.8"/>
+        <rect x="632" y="332" width="24" height="24" fill="var(--accent3)" opacity="0.4"/>
+        <text x="620" y="376" text-anchor="middle" font-size="12" fill="var(--ink)">头 8：局部窗口</text>
+        <text x="620" y="394" text-anchor="middle" font-size="10.5" fill="var(--muted)">只看近邻几格</text>
+      </g>
+    </svg>
+    <figcaption>图 4-2　八个头的注意力模式示意（根据真实模型中常见的观察风格化绘制）：次对角线 = 盯前一个词；动词行的横线 = 句法搭配；代词行的孤点 = 指代回溯；竖直亮线 = 句首锚点；主对角线 = 自关注；满屏均匀 = 全局摘要；首尾两点 = 远距离呼应；对角线宽带 = 局部窗口。一个真实模型里未必凑齐全部八种，措辞上请记作"观察显示，往往如此"。</figcaption>
+  </figure>
+
+  <h3>4.6 迷你手算：d_model=4、两个头，完整走一遍</h3>
+  <p>老规矩，大数字看趋势，小数字练肌肉。把模型缩到最小：<code class="math">d_model=4</code>、<code class="math">h=2</code> 个头、每头 <code class="math">d_k=d_v=2</code>，句子只有 2 个词。输入矩阵：</p>
+  <div class="formula"><b>X</b> = [ 词1: (1, 0, 1, 0) ; 词2: (0, 1, 0, 1) ]　　形状 [2×4]</div>
+  <h4>第 1 步：两个头各自的投影矩阵</h4>
+  <p>权重矩阵本是训练学出来的，这里为了手算方便直接指定（均为 [4×2]）：</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th></th><th><b>W</b><sub>Q</sub></th><th><b>W</b><sub>K</sub></th><th><b>W</b><sub>V</sub></th></tr></thead>
+      <tbody>
+        <tr><td><strong>头 1</strong></td><td>[[1,0],[0,1],[1,0],[0,1]]</td><td>[[1,0],[0,1],[0,0],[0,0]]</td><td>[[1,0],[0,0],[1,0],[0,0]]</td></tr>
+        <tr><td><strong>头 2</strong></td><td>[[0,1],[1,0],[0,1],[1,0]]</td><td>[[0,0],[0,0],[1,0],[0,1]]</td><td>[[0,0],[0,1],[0,0],[0,1]]</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h4>第 2 步：头 1 的完整注意力</h4>
+  <p>逐行做矩阵乘法 <code class="math"><b>Q</b>₁ = <b>X</b><b>W</b><sub>Q</sub>¹</code>：词1 的 (1,0,1,0) 乘 <code class="math"><b>W</b><sub>Q</sub>¹</code>，第 1 列 = 1·1+0·0+1·1+0·0 = 2，第 2 列 = 0，得 (2,0)；词2 得 (0,2)。同理算 K、V：</p>
+  <div class="formula"><b>Q</b>₁ = [(2,0);(0,2)]　<b>K</b>₁ = [(1,0);(0,1)]　<b>V</b>₁ = [(2,0);(0,0)]</div>
+  <p>打分 <code class="math"><b>Q</b>₁<b>K</b>₁ᵀ</code> = [[2,0],[0,2]]，除以 <code class="math">√d_k = √2 ≈ 1.4142</code> 得 [[1.4142, 0], [0, 1.4142]]。逐行 softmax：e<sup>1.4142</sup> ≈ 4.1133，e<sup>0</sup> = 1，所以 4.1133/5.1133 ≈ 0.8044，1/5.1133 ≈ 0.1956。权重矩阵：</p>
+  <div class="formula"><b>A</b>₁ = [[0.8044, 0.1956], [0.1956, 0.8044]]　→　head₁ = <b>A</b>₁<b>V</b>₁ = [(1.6089, 0); (0.3911, 0)]</div>
+  <p>读一下：头 1 里，词1 把 80% 的注意力给了自己——这是一个"自关注"型的小头。</p>
+  <h4>第 3 步：头 2 的完整注意力</h4>
+  <p>同样的流程，换头 2 的权重矩阵：</p>
+  <div class="formula"><b>Q</b>₂ = [(0,2);(2,0)]　<b>K</b>₂ = [(1,0);(0,1)]　<b>V</b>₂ = [(0,1);(0,1)]</div>
+  <p>打分 <code class="math"><b>Q</b>₂<b>K</b>₂ᵀ</code> = [[0,2],[2,0]]，缩放后 [[0, 1.4142], [1.4142, 0]]，softmax 得：</p>
+  <div class="formula"><b>A</b>₂ = [[0.1956, 0.8044], [0.8044, 0.1956]]　→　head₂ = <b>A</b>₂<b>V</b>₂ = [(0, 0.8044); (0, 0.8044)]</div>
+  <p>注意这里的变化：词1 在头 2 里把 80% 的注意力给了<strong>词2</strong>——同一个词，换了一组权重矩阵，就换了一种"看"的方式。头 1 自关注，头 2 交叉关注，<mark>这就是"两种相关标准"的最小实例</mark>。</p>
+  <h4>第 4 步：拼接 + 输出投影</h4>
+  <p>把两个头的输出沿特征维拼起来（[2×2] 与 [2×2] 拼成 [2×4]）：</p>
+  <div class="formula">Concat(head₁, head₂) = [ (1.6089, 0, 0, 0.8044) ; (0.3911, 0, 0, 0.8044) ]</div>
+  <p>最后乘 <code class="math"><b>W</b><sub>O</sub> [4×4]</code>。本例取单位矩阵（等价于"主席原样转述"），输出即上式，形状 <code class="math">[2×4]</code>——和输入 <code class="math"><b>X</b></code> 一模一样大，可以交给下一层继续加工。真实模型里 <code class="math"><b>W</b><sub>O</sub></code> 是学习出来的稠密矩阵，会把两个头的信息真正搅拌在一起。</p>
+  <div class="callout callout-tip">
+    <p class="callout-title">这个例子里最值得记住的画面</p>
+    <p>头 1 的 A 矩阵和头 2 的 A 矩阵恰好"上下颠倒"（[[0.80,0.20],[0.20,0.80]] vs [[0.20,0.80],[0.80,0.20]]）。输入 <b>X</b> 是同一个，softmax 是同一个，唯一不同的是权重矩阵——<strong>头的个性 100% 来自它那套 W_Q、W_K、W_V</strong>。训练干的事，就是把这 8 套矩阵调成 8 种互补的性格。</p>
+  </div>
+
+  <h3>4.7 交互演示：八个头并排看</h3>
+  <p>下面的演示把 8 个头画成 8 张 5×5 小热力图（数值是预计算的，但每个头的模式刻意做成图 4-2 里的典型样子）：头 1 盯着前一个词、头 2 锁定主语、头 4 锁定动词、头 5 自关注……<strong>点任意一张小图</strong>会放大并给出一句解读；「逐头轮播」会按顺序自动带你巡视 8 位"评审"的工作风格。注意观察每张图里"亮格"落在哪里、和行词是什么关系。</p>
+  <div class="demo-frame" data-demo="demo-multihead">正在加载交互演示…</div>
+  <div class="callout callout-tip">
+    <p class="callout-title">建议的玩法</p>
+    <ol>
+      <li>先点「逐头轮播」完整看一遍，给每个头的"性格"留个印象；</li>
+      <li>再回头重点对比头 1（看前一个词）和头 6（看后一个词）：两幅图恰好是镜像，体会"位置关系"也有方向之分；</li>
+      <li>最后换一句例句再看头 4：它锁定的始终是"动词位"，不管句子里具体是哪个词——头学到的是<strong>角色</strong>而不是某个具体词。</li>
+    </ol>
+  </div>
+
+  <h3>4.8 本章小结</h3>
+  <ul>
+    <li><strong>为什么多头</strong>：一句话里词与词同时存在语法、指代、位置、逻辑等多种关系，一组 Q、K、V 只能定义一种"相关标准"，一个头看不过来。</li>
+    <li><strong>评审团流程</strong>：8 个头各自持有独立的 <code class="math"><b>W</b><sub>Q</sub>ⁱ、<b>W</b><sub>K</sub>ⁱ、<b>W</b><sub>V</sub>ⁱ [512×64]</code>，各算各的注意力得 8 份 <code class="math">[n×64]</code>，拼接回 <code class="math">[n×512]</code>，再经 <code class="math"><b>W</b><sub>O</sub> [512×512]</code> 混合输出。形状进出都是 <code class="math">[n×512]</code>。</li>
+    <li><strong>维度分配</strong>：<code class="math">d_k = d_v = d_model / h = 512/8 = 64</code>。</li>
+    <li><strong>计算量几乎不变</strong>：8 × 64 = 512，头数与头维度互相抵消，唯一额外开销是 W_O 投影。"头越多越慢"在标准实现下不成立。</li>
+    <li><strong>分工是学出来的</strong>：观察显示训练后不同的头往往呈现位置型、句法型、指代型、锚点型等不同模式；这是经验规律而非保证，措辞上记作"往往"。</li>
+    <li><strong>头的个性来源</strong>：输入共享、算法相同，唯一区别是每个头自己的三套投影矩阵——4.6 节两头"上下颠倒"的 A 矩阵就是最小证据。</li>
+  </ul>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">常见误区</p>
+    <ul>
+      <li><strong>误区 1："8 个头，计算量就是 8 倍。"</strong>错。每个头的维度从 512 降到 64，两个因子恰好抵消（8 × 64 = 512），主体计算量与单个 512 维的头基本持平，只多一个 W_O 投影。详见 4.4 节的逐项对照表。</li>
+      <li><strong>误区 2："每个头必须人工指定分工，比如头 1 看语法、头 2 看指代。"</strong>错。8 个头初始化时几乎相同，分工是梯度下降自发分化出来的。研究者是事后观察才给它们贴的标签，而且总有些头难以解读。</li>
+      <li><strong>误区 3："拼接就是把 8 份输出加起来。"</strong>错。拼接（Concat）是沿特征维度横着粘，[6×64] × 8 → [6×512]，不损失任何信息；相加会把 8 份意见搅成一锅无法分离的粥，后面 W_O 也无从分工混合。</li>
+      <li><strong>误区 4："W_O 可有可无。"</strong>少了它，拼接结果只是 8 份意见的物理堆放，各头的信息没有机会互相交流。W_O 是"主席总评"那一步，让 8 种视角第一次发生化学反应。</li>
+      <li><strong>误区 5："头越多越好，64 个头一定比 8 个强。"</strong>不一定。头变多则每头维度变小（如 64 头 × 8 维），单个头的表达力被稀释；实践中 8~16 头是常见甜点区，头数是一个需要权衡的超参数，不是免费的增长。</li>
+    </ul>
+  </div>
+
+  <details class="quiz">
+    <summary>自测 1：原论文 base 模型 d_model=512、h=8。若改成 h=16 个头，每个头的 d_k 应是多少？总计算量大体怎么变？</summary>
+    <div class="quiz-body">
+      <p>d_k = d_v = 512/16 = 32。主体计算量仍然几乎不变：QKᵀ 打分从 8 × n²·64 变成 16 × n²·32，都是 n²·512；Q/K/V 投影同理抵消。多出来的只是 W_O 不变、头的调度开销略增。所以"16 个头更慢"主要来自工程细节而非理论计算量。</p>
+    </div>
+  </details>
+  <details class="quiz">
+    <summary>自测 2：4.6 节中头 1 的词1 注意力权重是 (0.8044, 0.1956)。这两个数是怎么从分数 (1.4142, 0) 算出来的？写出关键一步。</summary>
+    <div class="quiz-body">
+      <p>softmax：e<sup>1.4142</sup> ≈ 4.1133，e<sup>0</sup> = 1，分母 = 4.1133 + 1 = 5.1133。权重 = (4.1133/5.1133, 1/5.1133) ≈ (0.8044, 0.1956)。注意分数已经是除以 √2 缩放后的结果（原始点积是 (2, 0)）。</p>
+    </div>
+  </details>
+  <details class="quiz">
+    <summary>自测 3：6 个词的句子过一层多头注意力（d_model=512、h=8）。拼接之后、乘 W_O 之前的张量形状是什么？W_O 的形状又是什么？为什么这一层输出的形状必须和输入相同？</summary>
+    <div class="quiz-body">
+      <p>拼接后是 [6×512]（8 份 [6×64] 沿特征维粘连，8 × 64 = 512）；W_O 是 [512×512]，输出 [6×512] 与输入 X 形状一致。形状必须相同，因为 Transformer 是 6 层同构堆叠（第 6 章）：每一层的输出要直接喂给下一层，并且还要和本层输入做残差相加（第 5 章）——形状对不上，这两条都无从谈起。</p>
+    </div>
+  </details>
+</section>

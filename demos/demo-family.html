@@ -1,0 +1,554 @@
+<!-- demo-family：Transformer 三族交互族谱（BERT / GPT / T5） -->
+<style>
+  .dz-fam {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: inherit;
+    color: var(--ink);
+  }
+  .dz-fam * { box-sizing: border-box; }
+
+  .dz-fam-tabs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .dz-fam-tab {
+    flex: 1 1 140px;
+    min-height: 48px;
+    padding: 10px 14px;
+    border: 2px solid var(--line);
+    border-radius: 10px;
+    background: var(--paper2);
+    color: var(--ink);
+    font-size: 15px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    touch-action: manipulation;
+  }
+  .dz-fam-tab small {
+    display: block;
+    font-size: 11px;
+    font-weight: normal;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .dz-fam-tab:hover { transform: translateY(-2px); }
+  .dz-fam-tab.dz-fam-on[data-fam="bert"] { border-color: var(--accent); background: var(--accent); color: var(--paper2); }
+  .dz-fam-tab.dz-fam-on[data-fam="gpt"]  { border-color: var(--accent2); background: var(--accent2); color: var(--paper2); }
+  .dz-fam-tab.dz-fam-on[data-fam="t5"]   { border-color: var(--accent3); background: var(--accent3); color: var(--paper2); }
+  .dz-fam-tab.dz-fam-on small { color: var(--paper2); }
+
+  .dz-fam-stage {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--paper2);
+    padding: 10px;
+    margin-bottom: 12px;
+    overflow-x: auto;
+  }
+  .dz-fam-stage svg { display: block; width: 100%; height: auto; min-width: 340px; }
+
+  .dz-fam-controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .dz-fam-btn {
+    min-height: 44px;
+    padding: 8px 16px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--paper2);
+    color: var(--ink);
+    font-size: 14px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .dz-fam-btn:hover { border-color: var(--accent); }
+  .dz-fam-btn.dz-fam-active { background: var(--accent); color: var(--paper2); border-color: var(--accent); }
+
+  .dz-fam-status {
+    font-size: 14px;
+    color: var(--muted);
+    margin: 0 0 12px 0;
+    min-height: 1.5em;
+  }
+  .dz-fam-status strong { color: var(--ink); }
+
+  .dz-fam-panel {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+  }
+  .dz-fam-card {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: transparent;
+  }
+  .dz-fam-card h5 {
+    margin: 0 0 6px 0;
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: normal;
+  }
+  .dz-fam-card p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+
+  .dz-fam-err {
+    padding: 12px;
+    border: 1px solid var(--accent2);
+    border-radius: 8px;
+    color: var(--accent2);
+    font-size: 14px;
+  }
+  @media (max-width: 560px) {
+    .dz-fam-tab { flex-basis: 100%; }
+  }
+</style>
+
+<div class="dz-fam" id="dzFamRoot">
+  <div class="dz-fam-tabs" role="tablist" aria-label="选择模型家族">
+    <button class="dz-fam-tab" data-fam="bert" role="tab">BERT<small>编码器-only · 双向理解</small></button>
+    <button class="dz-fam-tab" data-fam="gpt" role="tab">GPT<small>解码器-only · 单向生成</small></button>
+    <button class="dz-fam-tab" data-fam="t5" role="tab">编码器-解码器（T5）<small>读全文 → 写答案</small></button>
+  </div>
+
+  <div class="dz-fam-controls">
+    <button class="dz-fam-btn" id="dzFamPlay">自动播放</button>
+    <button class="dz-fam-btn" id="dzFamStep">单步</button>
+    <button class="dz-fam-btn" id="dzFamReset">重置</button>
+  </div>
+
+  <div class="dz-fam-stage" id="dzFamStage"></div>
+  <p class="dz-fam-status" id="dzFamStatus"></p>
+
+  <div class="dz-fam-panel" id="dzFamPanel"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var NS = 'http://www.w3.org/2000/svg';
+
+  var FAMS = {
+    bert: {
+      key: 'bert',
+      color: 'var(--accent)',
+      title: 'BERT（编码器-only）',
+      input: ['我', '爱', '[MASK]', '学习', '。'],
+      maskIndex: 2,
+      output: ['我', '爱', '「自然语言」', '学习', '。'],
+      steps: [
+        '输入整句话，其中一个词被 [MASK] 盖住。',
+        '每个词与所有词连线：双向注意力，左右都能看见。',
+        '被盖住的位置综合左右文，输出对它原词的预测。',
+        '完成：「[MASK]」被预测为「自然语言」。这就是完形填空（MLM）。'
+      ],
+      cards: [
+        { h: '预训练任务', p: '掩码语言模型（MLM）：随机盖住约 15% 的词，让模型根据双向上下文猜回来。' },
+        { h: '典型应用', p: '文本分类、情感分析、命名实体识别、抽取式问答——一切「读懂已有文本」的任务。' },
+        { h: '代表模型与规模', p: 'BERT base：12 层、768 维、12 头、110M 参数；BERT large：24 层、1024 维、340M。' }
+      ]
+    },
+    gpt: {
+      key: 'gpt',
+      color: 'var(--accent2)',
+      title: 'GPT（解码器-only）',
+      input: ['今天', '天气', '很'],
+      gen: ['好', '，', '去', '散步', '。'],
+      steps: [
+        '输入上文「今天 天气 很」，因果掩码生效：每个词只看左边。',
+        '根据上文预测下一个词：「好」。',
+        '把「好」拼回输入末尾，再预测：「，」。',
+        '继续：「去」。每个新词都只依赖它左边的全部内容。',
+        '继续：「散步」。',
+        '继续：「。」——逐词生成完成。'
+      ],
+      cards: [
+        { h: '预训练任务', p: '下一词预测：给定前面所有词，预测下一个词。无需人工标注，原始文本自动出题。' },
+        { h: '典型应用', p: '聊天助手、写作、代码生成、翻译、摘要——一切「从左到右产出新文本」的任务。' },
+        { h: '代表模型与规模', p: 'GPT-3：96 层、12288 维、175B 参数；GPT-2：48 层、1600 维、1.5B。' }
+      ]
+    },
+    t5: {
+      key: 't5',
+      color: 'var(--accent3)',
+      title: 'T5（编码器-解码器）',
+      src: ['我', '爱', '学习'],
+      tgt: ['I', 'love', 'learning'],
+      steps: [
+        '编码器读入整个源句，词与词之间双向全连接。',
+        '编码完成：每个源词都带上了全文信息。',
+        '解码器启动：交叉注意力让解码器随时「回头看」编码器输出。',
+        '解码器逐词生成目标句：I → love → learning。每个词只看它左边的目标词。',
+        '翻译完成。'
+      ],
+      cards: [
+        { h: '预训练任务', p: '文本到文本（text-to-text）：把一切任务都写成「输入一段文本，输出一段文本」。' },
+        { h: '典型应用', p: '机器翻译、摘要、改写——输入输出界限分明的「转换」类任务。' },
+        { h: '代表模型与规模', p: 'T5 系列：base 220M，最大 T5-11B 达 110 亿参数；原始 Transformer base 为 65M。' }
+      ]
+    }
+  };
+
+  function el(tag, attrs, parent) {
+    var node = document.createElementNS(NS, tag);
+    if (attrs) {
+      for (var k in attrs) {
+        if (Object.prototype.hasOwnProperty.call(attrs, k)) node.setAttribute(k, attrs[k]);
+      }
+    }
+    if (parent) parent.appendChild(node);
+    return node;
+  }
+
+  function txt(parent, x, y, str, opts) {
+    var o = { x: x, y: y, 'font-family': 'inherit' };
+    if (opts) { for (var k in opts) o[k] = opts[k]; }
+    var t = el('text', o, parent);
+    t.textContent = str;
+    return t;
+  }
+
+  function init() {
+    var root = document.getElementById('dzFamRoot');
+    if (!root) return;
+    var stage = document.getElementById('dzFamStage');
+    var status = document.getElementById('dzFamStatus');
+    var panel = document.getElementById('dzFamPanel');
+    var btnPlay = document.getElementById('dzFamPlay');
+    var btnStep = document.getElementById('dzFamStep');
+    var btnReset = document.getElementById('dzFamReset');
+    var tabs = root.querySelectorAll('.dz-fam-tab');
+
+    var state = { fam: 'bert', step: 0, timer: null };
+
+    function stopTimer() {
+      if (state.timer) { clearInterval(state.timer); state.timer = null; }
+      btnPlay.textContent = '自动播放';
+      btnPlay.classList.remove('dz-fam-active');
+    }
+
+    function renderPanel(fam) {
+      panel.innerHTML = '';
+      FAMS[fam].cards.forEach(function (c) {
+        var card = document.createElement('div');
+        card.className = 'dz-fam-card';
+        var h = document.createElement('h5');
+        h.textContent = c.h;
+        var p = document.createElement('p');
+        p.textContent = c.p;
+        card.appendChild(h);
+        card.appendChild(p);
+        panel.appendChild(card);
+      });
+    }
+
+    function tokenBoxes(g, words, y, opts) {
+      opts = opts || {};
+      var gap = opts.gap || 8;
+      var h = 30;
+      var widths = words.map(function (w) { return Math.max(46, w.length * 15 + 18); });
+      var total = widths.reduce(function (a, b) { return a + b; }, 0) + gap * (words.length - 1);
+      var x = opts.x != null ? opts.x : (760 - total) / 2;
+      var centers = [];
+      words.forEach(function (w, i) {
+        var wdt = widths[i];
+        var isMask = (opts.maskIndex === i);
+        var isNew = (opts.newFrom != null && i >= opts.newFrom);
+        el('rect', {
+          x: x, y: y, width: wdt, height: h, rx: 6,
+          fill: isMask ? opts.color : (isNew ? opts.color : 'var(--paper2)'),
+          stroke: isMask || isNew ? opts.color : 'var(--line)',
+          'stroke-width': 1.5,
+          opacity: (opts.dimFrom != null && i >= opts.dimFrom && !isNew) ? 0.45 : 1
+        }, g);
+        var fill = (isMask || isNew) ? 'var(--paper2)' : 'var(--ink)';
+        txt(g, x + wdt / 2, y + h / 2 + 5, w, {
+          'font-size': 13, 'text-anchor': 'middle', fill: fill,
+          'font-weight': isMask || isNew ? 'bold' : 'normal'
+        });
+        centers.push({ x: x + wdt / 2, y: y, w: wdt });
+        x += wdt + gap;
+      });
+      return centers;
+    }
+
+    function causalLinks(g, centers, color, upto) {
+      // every position <= upto links to all positions to its left (and itself loop omitted)
+      var yTop = centers[0].y - 6;
+      for (var i = 1; i <= upto; i++) {
+        for (var j = 0; j < i; j++) {
+          var x1 = centers[i].x, x2 = centers[j].x;
+          var dy = 12 + (i - j) * 9;
+          el('path', {
+            d: 'M ' + x1 + ' ' + yTop + ' Q ' + ((x1 + x2) / 2) + ' ' + (yTop - dy - 14) + ' ' + x2 + ' ' + yTop,
+            fill: 'none', stroke: color, 'stroke-width': 1.2, opacity: 0.55
+          }, g);
+        }
+      }
+    }
+
+    function fullLinks(g, centers, color) {
+      var yTop = centers[0].y - 6;
+      var n = centers.length;
+      for (var i = 0; i < n; i++) {
+        for (var j = 0; j < n; j++) {
+          if (j === i) continue;
+          var x1 = centers[i].x, x2 = centers[j].x;
+          var dy = 10 + Math.abs(i - j) * 8;
+          el('path', {
+            d: 'M ' + x1 + ' ' + yTop + ' Q ' + ((x1 + x2) / 2) + ' ' + (yTop - dy - 16) + ' ' + x2 + ' ' + yTop,
+            fill: 'none', stroke: color, 'stroke-width': 1.1, opacity: 0.5
+          }, g);
+        }
+      }
+    }
+
+    function arrowMarker(defs, id, color) {
+      var m = el('marker', {
+        id: id, viewBox: '0 0 10 10', refX: 9, refY: 5,
+        markerWidth: 7, markerHeight: 7, orient: 'auto'
+      }, defs);
+      el('path', { d: 'M0,0 L10,5 L0,10 z', fill: color }, m);
+    }
+
+    /* ---------- renderers per family ---------- */
+
+    function renderBert(svg, defs, step) {
+      var f = FAMS.bert;
+      var color = f.color;
+      arrowMarker(defs, 'dzf-arr', color);
+
+      txt(svg, 380, 26, f.title, { 'font-size': 16, 'font-weight': 'bold', 'text-anchor': 'middle', fill: 'var(--ink)' });
+
+      // encoder block
+      el('rect', { x: 230, y: 90, width: 300, height: 130, rx: 12, fill: 'var(--paper2)', stroke: color, 'stroke-width': 2 }, svg);
+      txt(svg, 380, 112, '编码器 × 12', { 'font-size': 14, 'font-weight': 'bold', 'text-anchor': 'middle', fill: 'var(--ink)' });
+      txt(svg, 380, 130, '双向自注意力：每个词看见所有词', { 'font-size': 11, 'text-anchor': 'middle', fill: 'var(--muted)' });
+
+      // input tokens
+      var inG = el('g', {}, svg);
+      var inC = tokenBoxes(inG, f.input, 250, { color: color, maskIndex: f.maskIndex });
+      txt(svg, 60, 268, '输入', { 'font-size': 12, fill: 'var(--muted)' });
+
+      // up arrows
+      inC.forEach(function (c) {
+        el('line', { x1: c.x, y1: 250, x2: c.x, y2: 224, stroke: 'var(--muted)', 'stroke-width': 1.5, 'marker-end': 'url(#dzf-arr)' }, svg);
+      });
+
+      // step >= 1: full attention links inside encoder
+      if (step >= 1) {
+        var g = el('g', {}, svg);
+        var centers = tokenBoxes(g, f.input, 160, { color: color, maskIndex: f.maskIndex });
+        fullLinks(svg, centers, color);
+      } else {
+        tokenBoxes(el('g', { opacity: 0.35 }, svg), f.input, 160, { color: color, maskIndex: f.maskIndex });
+      }
+
+      // step >= 2: output prediction above
+      if (step >= 2) {
+        var outG = el('g', {}, svg);
+        var outWords = f.input.slice();
+        outWords[f.maskIndex] = (step >= 3) ? '「自然语言」' : '？';
+        var outC = tokenBoxes(outG, outWords, 46, { color: color, newFrom: f.maskIndex, dimFrom: 0 });
+        // clear dim: only mask output highlighted
+        txt(svg, 60, 64, '输出', { 'font-size': 12, fill: 'var(--muted)' });
+        var downX = outC[f.maskIndex].x;
+        el('line', { x1: downX, y1: 90, x2: downX, y2: 74, stroke: color, 'stroke-width': 2, 'marker-end': 'url(#dzf-arr)' }, svg);
+      }
+
+      if (step >= 3) {
+        txt(svg, 380, 320, '被盖住的词预测为「自然语言」——利用了左右两边的全部上下文', { 'font-size': 12, 'text-anchor': 'middle', fill: color, 'font-weight': 'bold' });
+      }
+    }
+
+    function renderGpt(svg, defs, step) {
+      var f = FAMS.gpt;
+      var color = f.color;
+      arrowMarker(defs, 'dzf-arr', color);
+
+      txt(svg, 380, 26, f.title, { 'font-size': 16, 'font-weight': 'bold', 'text-anchor': 'middle', fill: 'var(--ink)' });
+
+      var genCount = Math.max(0, Math.min(f.gen.length, step - 1));
+      var words = f.input.concat(f.gen.slice(0, genCount));
+      var newFrom = f.input.length;
+
+      el('rect', { x: 200, y: 90, width: 360, height: 150, rx: 12, fill: 'var(--paper2)', stroke: color, 'stroke-width': 2 }, svg);
+      txt(svg, 380, 112, '解码器 × N（因果掩码自注意力）', { 'font-size': 14, 'font-weight': 'bold', 'text-anchor': 'middle', fill: 'var(--ink)' });
+      txt(svg, 380, 130, '每个词只能看见它左边的词', { 'font-size': 11, 'text-anchor': 'middle', fill: 'var(--muted)' });
+
+      // tokens inside decoder
+      var g = el('g', {}, svg);
+      var centers = tokenBoxes(g, words, 170, { color: color, newFrom: newFrom });
+
+      if (step >= 1) {
+        causalLinks(svg, centers, color, centers.length - 1);
+      }
+
+      // arrows in
+      centers.forEach(function (c) {
+        el('line', { x1: c.x, y1: 270, x2: c.x, y2: 246, stroke: 'var(--muted)', 'stroke-width': 1.5, 'marker-end': 'url(#dzf-arr)' }, svg);
+      });
+      txt(svg, 60, 285, '输入（含已生成的词）', { 'font-size': 12, fill: 'var(--muted)' });
+
+      // bottom row echo of full sequence
+      tokenBoxes(el('g', {}, svg), words, 292, { color: color, newFrom: newFrom });
+
+      // next-token prediction above
+      if (step >= 1 && genCount < f.gen.length) {
+        var lastC = centers[centers.length - 1];
+        var nextWord = f.gen[genCount];
+        el('line', { x1: lastC.x, y1: 90, x2: lastC.x, y2: 70, stroke: color, 'stroke-width': 2, 'marker-end': 'url(#dzf-arr)' }, svg);
+        var bw = Math.max(50, nextWord.length * 16 + 20);
+        el('rect', { x: lastC.x - bw / 2, y: 38, width: bw, height: 30, rx: 6, fill: color, stroke: color }, svg);
+        txt(svg, lastC.x, 58, nextWord, { 'font-size': 13, 'text-anchor': 'middle', fill: 'var(--paper2)', 'font-weight': 'bold' });
+        txt(svg, lastC.x + bw / 2 + 8, 58, '← 预测的下一个词', { 'font-size': 11, fill: color });
+      }
+
+      if (step >= f.gen.length + 1) {
+        txt(svg, 380, 340, '生成完毕：「今天 天气 很 好 ， 去 散步 。」', { 'font-size': 13, 'text-anchor': 'middle', fill: color, 'font-weight': 'bold' });
+      }
+    }
+
+    function renderT5(svg, defs, step) {
+      var f = FAMS.t5;
+      var color = f.color;
+      arrowMarker(defs, 'dzf-arr', color);
+      arrowMarker(defs, 'dzf-arr-x', 'var(--accent)');
+
+      txt(svg, 380, 26, f.title, { 'font-size': 16, 'font-weight': 'bold', 'text-anchor': 'middle', fill: 'var(--ink)' });
+
+      // encoder block (left)
+      el('rect', { x: 80, y: 90, width: 260, height: 150, rx: 12, fill: 'var(--paper2)', stroke: color, 'stroke-width': 2 }, svg);
+      txt(svg, 210, 112, '编码器', { 'font-size': 14, 'font-weight': 'bold', 'text-anchor': 'middle', fill: 'var(--ink)' });
+      txt(svg, 210, 130, '双向注意力：通读全文', { 'font-size': 11, 'text-anchor': 'middle', fill: 'var(--muted)' });
+
+      var srcG = el('g', {}, svg);
+      var srcC = tokenBoxes(srcG, f.src, 170, { color: color, x: 105 });
+      if (step >= 1) fullLinks(svg, srcC, color);
+
+      // decoder block (right)
+      el('rect', { x: 420, y: 90, width: 260, height: 150, rx: 12, fill: 'var(--paper2)', stroke: color, 'stroke-width': 2 }, svg);
+      txt(svg, 550, 112, '解码器', { 'font-size': 14, 'font-weight': 'bold', 'text-anchor': 'middle', fill: 'var(--ink)' });
+      txt(svg, 550, 130, '因果掩码：只看左边', { 'font-size': 11, 'text-anchor': 'middle', fill: 'var(--muted)' });
+
+      var genCount = Math.max(0, Math.min(f.tgt.length, step - 3));
+      var tgtWords = f.tgt.slice(0, genCount);
+      var decG = el('g', {}, svg);
+      var tgtC = [];
+      if (tgtWords.length > 0) {
+        tgtC = tokenBoxes(decG, tgtWords, 170, { color: color, x: 445, newFrom: 0 });
+        if (step >= 4) causalLinks(svg, tgtC, color, tgtC.length - 1);
+      } else {
+        txt(svg, 550, 185, '（等待生成）', { 'font-size': 12, 'text-anchor': 'middle', fill: 'var(--muted)' });
+      }
+
+      // cross attention arrows: encoder -> decoder
+      if (step >= 2) {
+        srcC.forEach(function (sc) {
+          el('line', { x1: sc.x + 14, y1: sc.y - 4, x2: 520, y2: 145, stroke: 'var(--accent)', 'stroke-width': 1.6, opacity: 0.8, 'marker-end': 'url(#dzf-arr-x)' }, svg);
+        });
+        txt(svg, 380, 84, '交叉注意力：解码器回头看编码器', { 'font-size': 11, 'text-anchor': 'middle', fill: 'var(--accent)' });
+      }
+
+      // source input label + arrows
+      txt(svg, 60, 268, '源句', { 'font-size': 12, fill: 'var(--muted)' });
+      tokenBoxes(el('g', {}, svg), f.src, 252, { color: color, x: 105 });
+      srcC.forEach(function (c) {
+        el('line', { x1: c.x, y1: 252, x2: c.x, y2: 228, stroke: 'var(--muted)', 'stroke-width': 1.5, 'marker-end': 'url(#dzf-arr)' }, svg);
+      });
+
+      // target output below decoder
+      if (genCount > 0) {
+        txt(svg, 430, 268, '目标句', { 'font-size': 12, fill: 'var(--muted)' });
+        tokenBoxes(el('g', {}, svg), tgtWords, 252, { color: color, x: 470, newFrom: 0 });
+      }
+
+      if (step >= 5) {
+        txt(svg, 380, 320, '翻译完成：「我 爱 学习」 → 「I love learning」', { 'font-size': 13, 'text-anchor': 'middle', fill: color, 'font-weight': 'bold' });
+      }
+    }
+
+    function render() {
+      stopTimer();
+      draw();
+    }
+
+    function draw() {
+      var f = FAMS[state.fam];
+      stage.innerHTML = '';
+      var svg = el('svg', { viewBox: '0 0 760 360', role: 'img' }, stage);
+      var defs = el('defs', {}, svg);
+      if (state.fam === 'bert') renderBert(svg, defs, state.step);
+      else if (state.fam === 'gpt') renderGpt(svg, defs, state.step);
+      else renderT5(svg, defs, state.step);
+
+      var maxStep = f.steps.length - 1;
+      var s = Math.min(state.step, maxStep);
+      status.innerHTML = '<strong>第 ' + (s + 1) + '/' + (maxStep + 1) + ' 步：</strong>' + f.steps[s];
+      renderPanel(state.fam);
+    }
+
+    function maxStepOf(fam) { return FAMS[fam].steps.length - 1; }
+
+    tabs.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        state.fam = tab.getAttribute('data-fam');
+        state.step = 0;
+        tabs.forEach(function (t) { t.classList.toggle('dz-fam-on', t === tab); });
+        render();
+      });
+    });
+
+    btnStep.addEventListener('click', function () {
+      stopTimer();
+      if (state.step < maxStepOf(state.fam)) state.step++;
+      draw();
+    });
+
+    btnReset.addEventListener('click', function () {
+      state.step = 0;
+      render();
+    });
+
+    btnPlay.addEventListener('click', function () {
+      if (state.timer) { stopTimer(); return; }
+      if (state.step >= maxStepOf(state.fam)) state.step = 0;
+      btnPlay.textContent = '暂停';
+      btnPlay.classList.add('dz-fam-active');
+      state.timer = setInterval(function () {
+        if (state.step >= maxStepOf(state.fam)) { stopTimer(); return; }
+        state.step++;
+        draw();
+        if (state.step >= maxStepOf(state.fam)) stopTimer();
+      }, 1400);
+    });
+
+    // default
+    tabs.forEach(function (t) { t.classList.toggle('dz-fam-on', t.getAttribute('data-fam') === 'bert'); });
+    draw();
+  }
+
+  try {
+    init();
+  } catch (e) {
+    var root = document.getElementById('dzFamRoot');
+    if (root) {
+      var err = document.createElement('div');
+      err.className = 'dz-fam-err';
+      err.textContent = '演示加载失败：' + (e && e.message ? e.message : e);
+      root.appendChild(err);
+    }
+  }
+})();
+</script>

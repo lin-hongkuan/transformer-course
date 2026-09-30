@@ -1,0 +1,367 @@
+<div class="dz-dec" id="dzDecRoot">
+  <style>
+    .dz-dec { box-sizing: border-box; width: 100%; font-family: inherit; color: var(--ink, #1f2430); }
+    .dz-dec * { box-sizing: border-box; }
+    .dz-dec .dz-panel { background: var(--paper2, #f6f4ef); border: 1px solid var(--line, #ddd6c8); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+    .dz-dec .dz-prompt { font-size: 15px; margin-bottom: 8px; }
+    .dz-dec .dz-sentence { font-size: 20px; line-height: 1.9; min-height: 40px; padding: 8px 10px; background: var(--paper2, #f6f4ef); border: 1px dashed var(--line, #ddd6c8); border-radius: 10px; word-break: break-all; }
+    .dz-dec .dz-sentence .dz-fix { color: var(--muted, #8a8577); }
+    .dz-dec .dz-sentence .dz-gen { color: var(--ink, #1f2430); background: var(--paper2, #f6f4ef); padding: 1px 3px; border-radius: 5px; }
+    .dz-dec .dz-sentence .dz-gen.dz-last { background: var(--accent, #2563eb); color: var(--paper, #fff); }
+    .dz-dec .dz-modes { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+    .dz-dec .dz-mode-btn { flex: 1 1 100px; min-height: 44px; border: 1px solid var(--line, #ddd6c8); background: var(--paper2, #f6f4ef); color: var(--ink, #1f2430); border-radius: 10px; font-size: 15px; cursor: pointer; padding: 8px 6px; }
+    .dz-dec .dz-mode-btn.dz-on { background: var(--accent, #2563eb); color: var(--paper, #fff); border-color: var(--accent, #2563eb); }
+    .dz-dec .dz-slider-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
+    .dz-dec .dz-slider-row label { font-size: 14px; min-width: 120px; }
+    .dz-dec .dz-slider-row input[type="range"] { flex: 1 1 160px; min-height: 34px; accent-color: var(--accent, #2563eb); }
+    .dz-dec .dz-slider-row output { font-size: 14px; min-width: 46px; text-align: right; color: var(--muted, #8a8577); }
+    .dz-dec .dz-slider-row.dz-disabled { opacity: 0.4; pointer-events: none; }
+    .dz-dec .dz-btns { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+    .dz-dec .dz-btn { flex: 1 1 96px; min-height: 44px; border-radius: 10px; border: 1px solid var(--line, #ddd6c8); background: var(--paper2, #f6f4ef); color: var(--ink, #1f2430); font-size: 15px; cursor: pointer; padding: 8px 6px; }
+    .dz-dec .dz-btn.dz-primary { background: var(--accent, #2563eb); color: var(--paper, #fff); border-color: var(--accent, #2563eb); }
+    .dz-dec .dz-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    :root[data-theme="dark"] .dz-dec .dz-sentence .dz-gen.dz-last,
+    :root[data-theme="dark"] .dz-dec .dz-mode-btn.dz-on,
+    :root[data-theme="dark"] .dz-dec .dz-btn.dz-primary { color: #10142E; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) .dz-dec .dz-sentence .dz-gen.dz-last,
+      :root:not([data-theme="light"]) .dz-dec .dz-mode-btn.dz-on,
+      :root:not([data-theme="light"]) .dz-dec .dz-btn.dz-primary { color: #10142E; }
+    }
+    .dz-dec .dz-dist-title { font-size: 14px; color: var(--muted, #8a8577); margin: 4px 0 8px; }
+    .dz-dec .dz-bars { display: flex; flex-direction: column; gap: 6px; }
+    .dz-dec .dz-bar-row { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+    .dz-dec .dz-bar-word { width: 84px; flex: 0 0 84px; font-size: 14px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dz-dec .dz-bar-track { flex: 1; height: 24px; background: var(--paper2, #f6f4ef); border: 1px solid var(--line, #ddd6c8); border-radius: 6px; overflow: hidden; position: relative; }
+    .dz-dec .dz-bar-fill { height: 100%; background: var(--accent2, #0d9488); border-radius: 5px 0 0 5px; transition: width 0.35s ease; }
+    .dz-dec .dz-bar-row.dz-cut .dz-bar-fill { background: var(--line, #c9c2b2); }
+    .dz-dec .dz-bar-row.dz-cut .dz-bar-word, .dz-dec .dz-bar-row.dz-cut .dz-bar-pct { color: var(--muted, #8a8577); text-decoration: line-through; }
+    .dz-dec .dz-bar-row.dz-pick .dz-bar-fill { background: var(--accent, #2563eb); }
+    .dz-dec .dz-bar-row.dz-pick .dz-bar-word { font-weight: 700; color: var(--accent, #2563eb); }
+    .dz-dec .dz-bar-pct { width: 56px; flex: 0 0 56px; font-size: 13px; color: var(--muted, #8a8577); }
+    .dz-dec .dz-note { font-size: 13px; color: var(--muted, #8a8577); margin-top: 8px; line-height: 1.6; }
+    .dz-dec .dz-status { font-size: 14px; min-height: 22px; margin-top: 6px; color: var(--ink, #1f2430); }
+    .dz-dec .dz-status strong { color: var(--accent, #2563eb); }
+    .dz-dec .dz-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted, #8a8577); margin-top: 8px; }
+    .dz-dec .dz-legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+    .dz-dec .dz-legend .dz-lg-keep::before { background: var(--accent2, #0d9488); }
+    .dz-dec .dz-legend .dz-lg-cut::before { background: var(--line, #c9c2b2); }
+    .dz-dec .dz-legend .dz-lg-pick::before { background: var(--accent, #2563eb); }
+    .dz-dec .dz-err { color: var(--accent2, #b91c1c); font-size: 14px; padding: 10px; }
+    @media (max-width: 480px) {
+      .dz-dec .dz-bar-word { width: 64px; flex-basis: 64px; font-size: 13px; }
+      .dz-dec .dz-sentence { font-size: 17px; }
+    }
+  </style>
+
+  <div class="dz-panel">
+    <p class="dz-prompt">内置迷你"语言模型"：给定前缀 <strong>「今天 天气」</strong>，按一张预定义的续写概率表（程度词 → 形容词 → 逗号分句 → 结尾）逐词生成，最多 6 步。</p>
+    <div class="dz-sentence" id="dzDecSentence"><span class="dz-fix">今天 天气</span></div>
+    <div class="dz-status" id="dzDecStatus">选择模式，然后点「单步」或「自动播放」。</div>
+  </div>
+
+  <div class="dz-panel">
+    <div class="dz-modes" id="dzDecModes">
+      <button type="button" class="dz-mode-btn dz-on" data-mode="greedy">贪心</button>
+      <button type="button" class="dz-mode-btn" data-mode="temp">温度采样</button>
+      <button type="button" class="dz-mode-btn" data-mode="topp">top-p 核采样</button>
+    </div>
+    <div class="dz-slider-row dz-disabled" id="dzDecRowT">
+      <label for="dzDecT">温度 T（0.2 稳 ~ 2.0 野）</label>
+      <input type="range" id="dzDecT" min="0.2" max="2.0" step="0.1" value="1.0">
+      <output id="dzDecTVal">1.0</output>
+    </div>
+    <div class="dz-slider-row dz-disabled" id="dzDecRowP">
+      <label for="dzDecP">top-p 阈值（累积概率）</label>
+      <input type="range" id="dzDecP" min="0.5" max="1.0" step="0.05" value="0.9">
+      <output id="dzDecPVal">0.90</output>
+    </div>
+    <div class="dz-btns">
+      <button type="button" class="dz-btn dz-primary" id="dzDecStep">单步</button>
+      <button type="button" class="dz-btn" id="dzDecAuto">自动播放</button>
+      <button type="button" class="dz-btn" id="dzDecRegen">重新生成</button>
+      <button type="button" class="dz-btn" id="dzDecReset">重置</button>
+    </div>
+    <p class="dz-note" id="dzDecHint">贪心模式：每一步都选概率最大的词，所以无论点多少次「重新生成」，句子永远一模一样。</p>
+  </div>
+
+  <div class="dz-panel">
+    <p class="dz-dist-title" id="dzDecDistTitle">当前步概率分布（尚未开始）</p>
+    <div class="dz-bars" id="dzDecBars"></div>
+    <div class="dz-legend">
+      <span class="dz-lg-keep">候选词（可抽中）</span>
+      <span class="dz-lg-cut">被 top-p 截掉</span>
+      <span class="dz-lg-pick">本步选中</span>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    try {
+      var root = document.getElementById('dzDecRoot');
+      if (!root) return;
+
+      /* ---------- 内置迷你语言模型：续写概率表 ----------
+         结构：根据"已生成序列的最后一个词"查表得到下一词分布。
+         深度：程度词(第1词) → 形容词(第2词) → 逗号/结尾(第3词) → 分句(第4词) → 句号(第5词)。 */
+      var DEG = { '很': 1, '真': 1, '不': 1, '特别': 1, '有点': 1, '格外': 1 };
+      var SOFT = { '呢': 1, '呀': 1, '啊': 1, '哦': 1 };
+      var CLAUSE2 = { '适合出门': 1, '适合散步': 1, '记得加衣': 1, '适合郊游': 1, '心情也好': 1, '不想出门': 1 };
+
+      var NODES = {
+        START: [
+          ['很', 0.35], ['真', 0.20], ['不', 0.18], ['特别', 0.12], ['有点', 0.10], ['格外', 0.05]
+        ],
+        '很':   [['好', 0.45], ['冷', 0.20], ['热', 0.15], ['舒服', 0.12], ['不错', 0.08]],
+        '真':   [['好', 0.40], ['不错', 0.25], ['冷', 0.15], ['奇怪', 0.12], ['舒服', 0.08]],
+        '不':   [['错', 0.35], ['太好', 0.20], ['好', 0.18], ['稳定', 0.15], ['算冷', 0.12]],
+        '特别': [['好', 0.50], ['冷', 0.20], ['舒服', 0.15], ['适合出门', 0.10], ['晴朗', 0.05]],
+        '有点': [['冷', 0.40], ['热', 0.25], ['闷', 0.15], ['奇怪', 0.12], ['阴沉', 0.08]],
+        '格外': [['晴朗', 0.45], ['好', 0.25], ['冷', 0.15], ['舒服', 0.10], ['难得', 0.05]],
+        ADJ:    [['，', 0.40], ['。', 0.35], ['呢', 0.15], ['呀', 0.10]],
+        COMMA:  [
+          ['适合出门', 0.25], ['适合散步', 0.20], ['记得加衣', 0.18],
+          ['适合郊游', 0.15], ['心情也好', 0.12], ['不想出门', 0.10]
+        ],
+        CLAUSE2:[['。', 0.70], ['！', 0.20], ['呢', 0.10]],
+        SOFTN:  [['。', 0.80], ['！', 0.20]]
+      };
+
+      var PROMPT = ['今天', '天气'];
+      var MAX_WORDS = 6;
+      var END_TOKENS = { '。': 1, '！': 1 };
+
+      function nodeKeyFor(lastTok, generatedCount) {
+        if (generatedCount === 0) return 'START';
+        if (END_TOKENS[lastTok]) return 'END';
+        if (lastTok === '，') return 'COMMA';
+        if (SOFT[lastTok]) return 'SOFTN';
+        if (CLAUSE2[lastTok]) return 'CLAUSE2';
+        if (DEG[lastTok]) return lastTok;
+        return 'ADJ';
+      }
+
+      /* ---------- 状态 ---------- */
+      var state = {
+        mode: 'greedy',     // greedy | temp | topp
+        T: 1.0,
+        p: 0.9,
+        generated: [],      // 已生成的词
+        done: false,
+        playing: false,
+        timer: null
+      };
+
+      var elSentence = document.getElementById('dzDecSentence');
+      var elStatus = document.getElementById('dzDecStatus');
+      var elBars = document.getElementById('dzDecBars');
+      var elDistTitle = document.getElementById('dzDecDistTitle');
+      var elHint = document.getElementById('dzDecHint');
+      var elStep = document.getElementById('dzDecStep');
+      var elAuto = document.getElementById('dzDecAuto');
+      var elRegen = document.getElementById('dzDecRegen');
+      var elReset = document.getElementById('dzDecReset');
+      var elT = document.getElementById('dzDecT');
+      var elTVal = document.getElementById('dzDecTVal');
+      var elP = document.getElementById('dzDecP');
+      var elPVal = document.getElementById('dzDecPVal');
+      var rowT = document.getElementById('dzDecRowT');
+      var rowP = document.getElementById('dzDecRowP');
+      var modeWrap = document.getElementById('dzDecModes');
+
+      var HINTS = {
+        greedy: '贪心模式：每一步都选概率最大的词，所以无论点多少次「重新生成」，句子永远一模一样。',
+        temp: '温度采样：先按 T 给分布整形（T<1 更尖锐、T>1 更平坦），再按概率随机抽词。每次「重新生成」结果都不同。',
+        topp: 'top-p 核采样：从概率最大的词开始累加，累积刚达到 p 就截断，灰色词被踢出抽奖池，剩下的重新归一化再抽。'
+      };
+
+      /* ---------- 分布整形 ---------- */
+      function shapeDistribution(pairs) {
+        // 返回 [{word, p, cut}]，已按整形后概率降序
+        var arr = pairs.map(function (pr) { return { word: pr[0], p: pr[1], cut: false }; });
+        if (state.mode === 'temp') {
+          var invT = 1 / state.T;
+          var sum = 0;
+          arr.forEach(function (d) { d.p = Math.pow(d.p, invT); sum += d.p; });
+          arr.forEach(function (d) { d.p = d.p / sum; });
+        }
+        arr.sort(function (a, b) { return b.p - a.p; });
+        if (state.mode === 'topp') {
+          var cum = 0, keepN = 0;
+          for (var i = 0; i < arr.length; i++) {
+            cum += arr[i].p;
+            keepN = i + 1;
+            if (cum >= state.p) break;
+          }
+          var keptSum = 0;
+          arr.forEach(function (d, i) {
+            if (i < keepN) { keptSum += d.p; } else { d.cut = true; }
+          });
+          arr.forEach(function (d) { if (!d.cut) d.p = d.p / keptSum; });
+        }
+        return arr;
+      }
+
+      function pickWord(shaped) {
+        if (state.mode === 'greedy') {
+          return shaped[0].word; // 已降序，第一个即 argmax
+        }
+        var r = Math.random(), acc = 0;
+        for (var i = 0; i < shaped.length; i++) {
+          if (shaped[i].cut) continue;
+          acc += shaped[i].p;
+          if (r <= acc) return shaped[i].word;
+        }
+        for (var j = shaped.length - 1; j >= 0; j--) {
+          if (!shaped[j].cut) return shaped[j].word;
+        }
+        return shaped[0].word;
+      }
+
+      /* ---------- 渲染 ---------- */
+      function renderSentence(lastPicked) {
+        var html = '<span class="dz-fix">' + PROMPT.join(' ') + '</span> ';
+        state.generated.forEach(function (w, i) {
+          var cls = 'dz-gen' + (lastPicked && i === state.generated.length - 1 ? ' dz-last' : '');
+          html += '<span class="' + cls + '">' + w + '</span>';
+        });
+        elSentence.innerHTML = html;
+      }
+
+      function renderBars(shaped, picked) {
+        elBars.innerHTML = '';
+        if (!shaped) {
+          elDistTitle.textContent = '当前步概率分布（尚未开始）';
+          return;
+        }
+        var modeName = state.mode === 'greedy' ? '贪心' : (state.mode === 'temp' ? '温度 T=' + state.T.toFixed(1) : 'top-p p=' + state.p.toFixed(2));
+        elDistTitle.textContent = '第 ' + state.generated.length + ' 步分布（' + modeName + ' 整形后）';
+        shaped.forEach(function (d) {
+          var row = document.createElement('div');
+          row.className = 'dz-bar-row' + (d.cut ? ' dz-cut' : '') + (d.word === picked ? ' dz-pick' : '');
+          var pct = Math.round(d.p * 1000) / 10;
+          row.innerHTML =
+            '<span class="dz-bar-word">' + d.word + '</span>' +
+            '<span class="dz-bar-track"><span class="dz-bar-fill" style="width:' + Math.max(2, pct) + '%"></span></span>' +
+            '<span class="dz-bar-pct">' + pct.toFixed(1) + '%</span>';
+          elBars.appendChild(row);
+        });
+      }
+
+      function setStatus(html) { elStatus.innerHTML = html; }
+
+      /* ---------- 主流程 ---------- */
+      function currentPairs() {
+        var last = state.generated.length ? state.generated[state.generated.length - 1] : null;
+        var key = nodeKeyFor(last, state.generated.length);
+        if (key === 'END') return null;
+        return NODES[key];
+      }
+
+      function stepOnce() {
+        if (state.done) return false;
+        var pairs = currentPairs();
+        if (!pairs || state.generated.length >= MAX_WORDS) {
+          state.done = true;
+          stopAuto();
+          renderSentence(false);
+          setStatus('生成结束。点「重新生成」或「重置」再来一局。');
+          return false;
+        }
+        var shaped = shapeDistribution(pairs);
+        var word = pickWord(shaped);
+        state.generated.push(word);
+        renderSentence(true);
+        renderBars(shaped, word);
+        var why = state.mode === 'greedy'
+          ? '贪心：直接取概率最大的 <strong>' + word + '</strong>'
+          : '抽奖结果：<strong>' + word + '</strong>' + (state.mode === 'topp' ? '（灰色词已被 top-p 截掉）' : '（T=' + state.T.toFixed(1) + ' 整形后抽样）');
+        setStatus('第 ' + state.generated.length + ' 步　' + why);
+        if (END_TOKENS[word] || state.generated.length >= MAX_WORDS) {
+          state.done = true;
+          stopAuto();
+          setStatus('第 ' + state.generated.length + ' 步选中 <strong>' + word + '</strong>，句子完成：<strong>「今天 天气' + state.generated.join('') + '」</strong>');
+        }
+        return !state.done;
+      }
+
+      function stopAuto() {
+        state.playing = false;
+        if (state.timer) { clearTimeout(state.timer); state.timer = null; }
+        elAuto.textContent = '自动播放';
+      }
+
+      function autoTick() {
+        if (!state.playing) return;
+        var more = stepOnce();
+        if (more && state.playing) {
+          state.timer = setTimeout(autoTick, 950);
+        } else {
+          stopAuto();
+        }
+      }
+
+      function resetAll() {
+        stopAuto();
+        state.generated = [];
+        state.done = false;
+        renderSentence(false);
+        renderBars(null);
+        setStatus('已重置。点「单步」或「自动播放」开始。');
+      }
+
+      /* ---------- 事件 ---------- */
+      modeWrap.addEventListener('click', function (ev) {
+        var btn = ev.target.closest('.dz-mode-btn');
+        if (!btn) return;
+        state.mode = btn.getAttribute('data-mode');
+        Array.prototype.forEach.call(modeWrap.children, function (b) {
+          b.classList.toggle('dz-on', b === btn);
+        });
+        rowT.classList.toggle('dz-disabled', state.mode !== 'temp');
+        rowP.classList.toggle('dz-disabled', state.mode !== 'topp');
+        elHint.textContent = HINTS[state.mode];
+        resetAll();
+      });
+
+      elT.addEventListener('input', function () {
+        state.T = parseFloat(elT.value);
+        elTVal.textContent = state.T.toFixed(1);
+      });
+      elP.addEventListener('input', function () {
+        state.p = parseFloat(elP.value);
+        elPVal.textContent = state.p.toFixed(2);
+      });
+
+      elStep.addEventListener('click', function () {
+        if (state.done) resetAll();
+        stepOnce();
+      });
+
+      elAuto.addEventListener('click', function () {
+        if (state.playing) { stopAuto(); return; }
+        if (state.done) resetAll();
+        state.playing = true;
+        elAuto.textContent = '暂停';
+        autoTick();
+      });
+
+      elRegen.addEventListener('click', function () {
+        resetAll();
+        state.playing = true;
+        elAuto.textContent = '暂停';
+        autoTick();
+      });
+
+      elReset.addEventListener('click', function () { resetAll(); });
+
+      renderSentence(false);
+    } catch (err) {
+      var rootEl = document.getElementById('dzDecRoot');
+      if (rootEl) {
+        rootEl.innerHTML = '<p class="dz-err">交互演示加载失败：' + (err && err.message ? err.message : err) + '</p>';
+      }
+    }
+  })();
+  </script>
+</div>

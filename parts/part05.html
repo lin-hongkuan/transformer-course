@@ -1,0 +1,507 @@
+<section class="chapter" id="ch05">
+  <header class="ch-head">
+    <p class="ch-eyebrow">第 5 章 · 前馈网络与残差/层归一化</p>
+    <h2>让信息稳定地流过六层高楼</h2>
+    <p class="ch-lede">学完<a href="#ch03" class="xref">第 3 章</a>和<a href="#ch04" class="xref">第 4 章</a>，你已经掌握了 Transformer 的心脏——注意力。但一个完整的 Transformer 层里，注意力只负责"词与词之间的交流"，还有两个关键零件等着我们：让每个词"自己思考"的前馈网络（FFN），以及让六层（甚至九十六层）高楼不会塌掉的两个稳定器：残差连接和层归一化。本章结束后，你将能手算一个完整 FFN 的前向传播，并说清楚为什么 ∂(x+F(x))/∂x 里那个"1"是深网络的救命稻草。</p>
+  </header>
+
+  <h3><span class="sec-no">5.1</span> 注意力管"交流"，那"思考"谁来管？</h3>
+
+  <p>先回想一下我们的多层叙事。在<a href="#ch03" class="xref">第 3 章</a>里，我们把注意力比作一场"圆桌会议"：每个词拿着自己的 Query（查询向量）去问别的词"你跟我的关系大吗"，然后根据答案（注意力权重）把别的词的 Value（值向量）加权搬回来。会议结束后，每个词的表示里都<mark>混入了上下文的信息</mark>。</p>
+
+  <p>但"开会"只是第一步。开完会，每个词还需要<mark>自己回到工位上消化</mark>：把刚刚收集到的信息加工、提炼、转换成更有用的特征。这个"独自消化"的步骤，就是<strong>前馈网络（Feed-Forward Network，简称 FFN）</strong>。</p>
+
+  <p>我们可以把一个 Transformer 编码器层想象成一家公司的两个固定环节：</p>
+
+  <ol>
+    <li><strong>全员大会（多头注意力）</strong>：信息在词与词之间流动。</li>
+    <li><strong>个人工位（前馈网络）</strong>：每个词独立地对自己的信息做深加工，词与词之间此刻<mark>完全不交流</mark>。</li>
+  </ol>
+
+  <p>这两个环节之外，还各缠着一条"安全带"（残差连接）和一个"调音台"（层归一化）。本章会把这个完整的车间——也就是一个标准编码器层——彻底拆开。</p>
+
+  <h3><span class="sec-no">5.2</span> 前馈网络：先升维，再压回来</h3>
+
+  <p>FFN 的结构简单到出乎意料：它就是两个线性变换（乘以权重矩阵），中间夹一个非线性激活函数。原论文用的激活函数是 ReLU（Rectified Linear Unit，整流线性单元，规则就一条：正数原样通过，负数砍掉变 0）。公式如下：</p>
+
+  <div class="formula">
+    FFN(<strong>x</strong>) = max(0, <strong>x</strong><strong>W</strong>₁ + <strong>b</strong>₁)<strong>W</strong>₂ + <strong>b</strong>₂
+  </div>
+
+  <p>逐符号读一遍：</p>
+
+  <ul>
+    <li><strong>x</strong>：某个词当前的表示向量。在原论文里它的长度是 <code>d_model = 512</code>，也就是 512 个数字。</li>
+    <li><strong>W</strong>₁：第一层权重矩阵，形状是 [512 × 2048]——它把 512 维的输入<mark>放大到 2048 维</mark>。这个 2048 记作 <code>d_ff</code>，原论文里 <code>d_ff = 2048</code>，恰好是 d_model 的 4 倍。</li>
+    <li><strong>b</strong>₁：第一层偏置向量，2048 个数字，给每个高维特征一个"基础偏移"。</li>
+    <li><code>max(0, ·)</code>：ReLU 激活，逐元素比较，小于 0 的全部归零。</li>
+    <li><strong>W</strong>₂：第二层权重矩阵，形状 [2048 × 512]，把高维结果<mark>压回 512 维</mark>。</li>
+    <li><strong>b</strong>₂：第二层偏置向量，512 个数字。</li>
+  </ul>
+
+  <p>所以整条流水线是：<code>[512] → [2048] → [512]</code>。先膨胀到 4 倍，再压缩回原样。数据形状的旅程用图表示如下。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 760 250" role="img" aria-label="FFN 维度变化流程图" font-family="inherit">
+      <defs>
+        <marker id="arr-05" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+      <rect x="20" y="85" width="130" height="70" rx="10" fill="var(--paper2)" stroke="var(--line)"/>
+      <text x="85" y="115" text-anchor="middle" fill="var(--ink)" font-size="14">输入 x</text>
+      <text x="85" y="138" text-anchor="middle" fill="var(--muted)" font-size="13">[512]</text>
+
+      <line x1="150" y1="120" x2="205" y2="120" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-05)"/>
+      <text x="177" y="105" text-anchor="middle" fill="var(--muted)" font-size="12">× W₁ + b₁</text>
+
+      <rect x="210" y="55" width="150" height="130" rx="10" fill="var(--accent)" opacity="0.15"/>
+      <rect x="210" y="55" width="150" height="130" rx="10" fill="none" stroke="var(--accent)"/>
+      <text x="285" y="110" text-anchor="middle" fill="var(--ink)" font-size="14">高维空间</text>
+      <text x="285" y="133" text-anchor="middle" fill="var(--muted)" font-size="13">[2048]</text>
+      <text x="285" y="156" text-anchor="middle" fill="var(--accent)" font-size="12">ReLU: max(0,·)</text>
+
+      <line x1="360" y1="120" x2="415" y2="120" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-05)"/>
+      <text x="387" y="105" text-anchor="middle" fill="var(--muted)" font-size="12">× W₂ + b₂</text>
+
+      <rect x="420" y="85" width="130" height="70" rx="10" fill="var(--paper2)" stroke="var(--line)"/>
+      <text x="485" y="115" text-anchor="middle" fill="var(--ink)" font-size="14">输出</text>
+      <text x="485" y="138" text-anchor="middle" fill="var(--muted)" font-size="13">[512]</text>
+
+      <text x="285" y="225" text-anchor="middle" fill="var(--muted)" font-size="13">形状旅程： [512]  →  升维 4 倍  [2048]  →  压回  [512]</text>
+    </svg>
+    <figcaption>图 5-1 FFN 的两个线性层把词向量先升到 2048 维，经过 ReLU 筛选，再压回 512 维。</figcaption>
+  </div>
+
+  <h4>为什么非要"先升维再降维"？</h4>
+
+  <p>这是本章第一个值得停下来想的问题：既然最后还是回到 512 维，为什么不直接在 512 维里做变换，白白绕一圈？</p>
+
+  <p>想象你在揉面团。面粉、水、酵母刚混在一起时是一团黏糊糊的东西，直接塑形很困难——各种成分挤在一起、分不开。聪明的做法是<mark>先把面团揉开、摊开、拉抻</mark>，让每一种成分在大空间里舒展开，你能清楚地看到哪一团是筋、哪一块是气泡，该切的切、该留的留；<mark>处理完了再收拢塑形</mark>，变回一个紧实的面团。</p>
+
+  <p>FFN 干的是同样的事。一个词经过注意力之后，它的 512 维向量里塞满了刚刚收来的上下文信息，各种特征纠缠在一起。<strong>W</strong>₁ 把这团信息<mark>摊开到 2048 维的"工作台"上</mark>：在高维空间里，原本挤在一起、难以区分的特征更容易被"分开摆放"（数学上这对应一个经典事实——数据被投影到更高维后，更容易找到线性可分的划分）。然后 ReLU 扮演质检员：2048 个高维特征里，<mark>不相关的、弱的特征被打成 0 扔掉，只有被激活的强特征留下来</mark>。最后 <strong>W</strong>₂ 把筛选、重组过的精华重新压缩回 512 维，交还给主干道。</p>
+
+  <p>你也可以把 FFN 想成一个有 2048 位专科医生的会诊室：512 维的"病情描述"被送进会诊室，每位专科医生（高维特征）只对自己关心的模式做反应（ReLU 决定他是否开口），最后汇总结论压回 512 维病历。升维让"每位医生有自己的诊室"，这就是 4 倍扩张的意义。</p>
+
+  <div class="callout callout-info">
+    <p class="callout-title">激活函数的江湖</p>
+    <p>2017 年原论文用 ReLU。后来的模型发现更平滑的激活效果更好：BERT、GPT 系列早期版本常用 <strong>GELU</strong>（高斯误差线性单元，负数不完全归零，而是平滑地压向 0）；LLaMA 等现代大模型则用 <strong>SwiGLU</strong>（一种带"门控"的变体，参数量略增但表达力更强）。它们的差别属于"进阶调料"，思想都是"温和地筛选特征"，具体细节我们留到<a href="#ch09" class="xref">第 9 章</a>的现代变体里展开。本章你只需要记住 ReLU 这条最朴素的规则。</p>
+  </div>
+
+  <h3><span class="sec-no">5.3</span> Position-wise：同一个 FFN，每个词各用各的</h3>
+
+  <p>论文里给 FFN 加了一个定语：<strong>position-wise feed-forward networks</strong>（逐位置前馈网络）。这个定语是本节的主角，它的意思是：</p>
+
+  <div class="callout">
+    <p class="callout-title">关键定义</p>
+    <p>同一层里<mark>只有一个 FFN</mark>（一套 W₁、b₁、W₂、b₂），它被应用到序列的<mark>每一个位置上</mark>，每个位置独立地、互不干扰地通过这同一个网络。</p>
+  </div>
+
+  <p>用"工位"类比继续：公司只配了一台"信息加工机"（FFN），开完全员大会后，每个词排队<mark>各自</mark>把材料送进去加工。机器对谁都用同一套加工参数，但加工过程是一个词一个词独立进行的——"我"进去加工的时候，完全看不到"爱"正在被加工成什么样。词与词之间的交流，已经在上一步注意力里完成了；FFN 不负责交流，只负责深加工。</p>
+
+  <p>假设一个序列有 6 个词（比如"我 爱 深 度 学 习"），每个词是一个 512 维向量，那么整个序列就是一个 [6 × 512] 的矩阵。FFN 作用在这 6 行上，<mark>每一行独立</mark>：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>位置</th><th>词</th><th>输入（各自独立）</th><th>经过的 FFN</th><th>输出（各自独立）</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>0</td><td>我</td><td><strong>x</strong>₀ [512]</td><td rowspan="6" style="vertical-align:middle;"><strong>同一个 FFN</strong><br>同一套 W₁ b₁ W₂ b₂</td><td><strong>y</strong>₀ [512]</td></tr>
+        <tr><td>1</td><td>爱</td><td><strong>x</strong>₁ [512]</td><td><strong>y</strong>₁ [512]</td></tr>
+        <tr><td>2</td><td>深</td><td><strong>x</strong>₂ [512]</td><td><strong>y</strong>₂ [512]</td></tr>
+        <tr><td>3</td><td>度</td><td><strong>x</strong>₃ [512]</td><td><strong>y</strong>₃ [512]</td></tr>
+        <tr><td>4</td><td>学</td><td><strong>x</strong>₄ [512]</td><td><strong>y</strong>₄ [512]</td></tr>
+        <tr><td>5</td><td>习</td><td><strong>x</strong>₅ [512]</td><td><strong>y</strong>₅ [512]</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>这张表也是理解 Transformer 并行性的钥匙：因为每个位置的 FFN 计算互不依赖，<mark>6 个词的加工可以同时在 GPU 的 6 路流水线上跑</mark>，不需要像 RNN 那样等"我"算完才能算"爱"。从矩阵角度看，整个 [6 × 512] 的矩阵乘上 W₁ [512 × 2048] 得到 [6 × 2048]，过 ReLU，再乘 W₂ 得到 [6 × 512]——数学上是矩阵乘法，效果上就是 6 个词各自过了一遍同一个 FFN。</p>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">常见混淆：FFN 里词与词会交流吗？</p>
+    <p>不会。很多人会误以为"矩阵乘法让行与行混在一起了"。请记住：FFN 的两次矩阵乘法里，权重矩阵 W₁、W₂ 只在<mark>特征维度（512/2048 这一侧）</mark>上做混合，<mark>词与词（行与行）之间没有任何交叉项</mark>。第 i 行的输出只由第 i 行的输入决定。想让词与词说话？那是注意力的职责，回到<a href="#ch03" class="xref">第 3 章</a>。</p>
+  </div>
+
+  <h3><span class="sec-no">5.4</span> 手算一个迷你 FFN（d_model=2, d_ff=4）</h3>
+
+  <p>512 和 2048 太抽象了。我们把数字缩到手能算的大小：设 <code>d_model = 2</code>，<code>d_ff = 4</code>（仍然是"4 倍升维"的精神）。给定一个词的输入向量：</p>
+
+  <div class="formula">
+    <strong>x</strong> = [1, 2]
+  </div>
+
+  <p>第一层参数（全是一眼能算的小数字）：</p>
+
+  <div class="formula">
+    <strong>W</strong>₁ = [[1, 0, 1, −1], [0, 1, 1, 1]] ， <strong>b</strong>₁ = [0, 0, −1, 0]
+  </div>
+
+  <p><strong>第一步：计算 <strong>x</strong><strong>W</strong>₁ + <strong>b</strong>₁。</strong> 结果有 4 个分量，逐个算（每个分量 = x 的两个元素与 W₁ 对应列做点积，再加偏置）：</p>
+
+  <ul>
+    <li>分量 1：1×1 + 2×0 + 0 = <strong>1</strong></li>
+    <li>分量 2：1×0 + 2×1 + 0 = <strong>2</strong></li>
+    <li>分量 3：1×1 + 2×1 − 1 = <strong>2</strong></li>
+    <li>分量 4：1×(−1) + 2×1 + 0 = <strong>1</strong></li>
+  </ul>
+
+  <p>得到升维后的中间向量 <strong>h</strong>_pre = [1, 2, 2, 1]。</p>
+
+  <p><strong>第二步：过 ReLU。</strong> 这里四个数恰好都是正的，所以 ReLU 不动它们：<strong>h</strong> = [1, 2, 2, 1]。</p>
+
+  <div class="callout callout-tip">
+    <p class="callout-title">看一眼 ReLU 的"质检"作用</p>
+    <p>假如偏置 b₁ 换成 [−3, 0, −5, 0]，中间向量会变成 [−2, 2, −2, 1]，ReLU 之后就是 [0, 2, 0, 1]——两个特征被"判定不相关"而清零。这就是为什么 ReLU 让网络具有"选择能力"：它制造出大量 0，强迫网络只让少数通道通过。</p>
+  </div>
+
+  <p><strong>第三步：乘回 W₂ 降维。</strong> 设：</p>
+
+  <div class="formula">
+    <strong>W</strong>₂ = [[1, 0], [0, 1], [1, 1], [−1, 0]] ， <strong>b</strong>₂ = [0, 1]
+  </div>
+
+  <p>输出 2 个分量：</p>
+
+  <ul>
+    <li>分量 1：1×1 + 2×0 + 2×1 + 1×(−1) + 0 = <strong>2</strong></li>
+    <li>分量 2：1×0 + 2×1 + 2×1 + 1×0 + 1 = <strong>5</strong></li>
+  </ul>
+
+  <div class="formula">
+    FFN([1, 2]) = [2, 5]
+  </div>
+
+  <p>完成。[1, 2] 进去，[2, 5] 出来，中间经过了一次"2 → 4 → 2"的升维-筛选-压缩之旅。真实模型里每个数字都是训练学出来的浮点数，但流程与这个手算<mark>一模一样</mark>。本章末尾的交互演示（5.9 节）里也内置了这个迷你 FFN，你可以亲手调参数复算。</p>
+
+  <h4>算一笔账：FFN 占了多少参数？</h4>
+
+  <p>别忘了 FFN 是有"体重"的。回到真实数字 <code>d_model = 512</code>、<code>d_ff = 2048</code>：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>参数</th><th>形状</th><th>数量</th></tr></thead>
+      <tbody>
+        <tr><td>W₁</td><td>[512 × 2048]</td><td>1,048,576</td></tr>
+        <tr><td>b₁</td><td>[2048]</td><td>2,048</td></tr>
+        <tr><td>W₂</td><td>[2048 × 512]</td><td>1,048,576</td></tr>
+        <tr><td>b₂</td><td>[512]</td><td>512</td></tr>
+        <tr><td><strong>合计</strong></td><td>—</td><td><strong>2,099,712 ≈ 210 万</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>而一层多头注意力的四个权重矩阵（W_Q、W_K、W_V、W_O，各 [512 × 512]）合计约 105 万参数。也就是说，<mark>FFN 占了每个编码器层约三分之二的参数</mark>。有一个流行的说法：注意力是"路由器"，决定信息从哪里来；FFN 是"知识库"，模型学到的大量"事实与模式"被认为主要存储在 FFN 的权重里。这也是为什么后来各种"专家混合（MoE）"结构改造的几乎都是 FFN 部分。</p>
+
+  <h3><span class="sec-no">5.5</span> 残差连接：给梯度修一条高速公路</h3>
+
+  <p>现在把目光从 FFN 内部移出来，看看它外面包着的那条"安全带"。Transformer 里，每个子层（注意力、FFN）的输出都不是直接替换输入，而是：</p>
+
+  <div class="formula">
+    输出 = <strong>x</strong> + Sublayer(<strong>x</strong>)
+  </div>
+
+  <p>这就是<strong>残差连接（Residual Connection）</strong>，也叫"跳跃连接（Skip Connection）"：把子层的输入 x <mark>原封不动地抄一份，直接加到子层的输出上</mark>。注意这里有一个硬性要求：子层的输出维度必须和输入相同（这正是 FFN 最后要"压回 512 维"的原因之一——维度不一致就没法相加）。</p>
+
+  <h4>类比：修订模式，而不是重写</h4>
+
+  <p>想象你请一位编辑帮你修改文章。有两种工作方式：</p>
+
+  <ul>
+    <li><strong>重写模式</strong>（没有残差）：编辑读完全文，凭记忆重新写一遍。改六轮之后，文章很可能已经面目全非——每一轮重写都可能丢掉原文的信息，而且一旦某一棒写砸了，后面所有棒都在烂稿子上继续错。</li>
+    <li><strong>修订模式</strong>（有残差）：编辑拿到你的原稿（x），只在上面<mark>做批注和改动</mark>（F(x)），交回来的是"原稿 + 批注"（x + F(x)）。哪怕某个编辑水平很差、批注全是废话，你的原稿也一字未丢；六位编辑接力之后，文章是原稿加上层层累积的修订痕迹。</li>
+  </ul>
+
+  <p>残差连接让每一个子层学的不是"新的完整表示"，而是<mark>对当前表示的"增量修正"</mark>。子层就算什么都没学到（F(x) ≈ 0），网络至少退化成"原样传下去"，不会比浅层网络更差。这个性质让"堆更多层"变成一件安全的事。</p>
+
+  <h4>为什么深网络需要它：梯度消失问题</h4>
+
+  <p>训练神经网络靠"反向传播"：从最后的损失出发，把"该往哪个方向调参数"的信号（梯度）一层一层传回前面的层。问题在于，梯度每穿过一层，就要<mark>乘上那层的导数</mark>。如果每层的导数大约只有 0.8，那么穿过 30 层之后：</p>
+
+  <div class="formula">
+    0.8³⁰ ≈ 0.00124
+  </div>
+
+  <p>梯度被缩小到原来的千分之一——最前面的层几乎收不到任何训练信号，参数不动了，学不动了。这就是<strong>梯度消失（vanishing gradient）</strong>。六层也许还撑得住，几十上百层（GPT-3 有 96 层）就会彻底瘫痪。</p>
+
+  <p>残差连接的救命之处可以用一行数学看清楚。设输出 y = x + F(x)，那么 y 对 x 的导数是：</p>
+
+  <div class="formula">
+    ∂y/∂x = ∂(x + F(x))/∂x = <mark>1</mark> + ∂F/∂x
+  </div>
+
+  <p>注意那个<mark>醒目的 "1"</mark>。反向传播经过这一层时，梯度不再只是乘上 ∂F/∂x（那个可能很小的数），而是乘上 (1 + ∂F/∂x)。就算 F 的导数接近 0，梯度也能<mark>原封不动地通过那个 "1" 传回去</mark>——就像高速公路上除了蜿蜒的辅路（F），永远有一条笔直的主干道（恒等通道 x）。N 层连乘时，这些 "1" 项保证梯度里始终存在一条不衰减的路径，深网络的每一层都能收到清晰的训练信号。</p>
+
+  <div class="callout callout-info">
+    <p class="callout-title">一句话记住残差连接</p>
+    <p>前向时，它是"原稿 + 批注"，信息不丢；反向时，它是梯度的高速公路，∂y/∂x 里的那个 +1 让信号永不归零。本章末尾的交互演示会让你亲眼看到这两条曲线的天壤之别。</p>
+  </div>
+
+  <h3><span class="sec-no">5.6</span> 层归一化：把每个向量调回"标准音量"</h3>
+
+  <p>第二个稳定器是<strong>层归一化（Layer Normalization，简称 LayerNorm 或 LN）</strong>。它要解决的问题是：随着数据流过一个又一个子层，向量里数字的<mark>大小和分布会漂移</mark>——有的层输出动不动就是几十，有的层又全是零点零几。数值尺度飘来飘去，训练就会像踩着一艘不停晃动的船：激活函数容易饱和，梯度忽大忽小。</p>
+
+  <p>LayerNorm 的做法一句话说完：<mark>对每个词的向量，减去它自己的均值，再除以它自己的标准差</mark>，把每个向量重新拉回"均值 0、标准差 1"的标准分布。就像一个调音台，不管歌手嗓门大小，都先归一到标准音量再做混音。</p>
+
+  <div class="formula">
+    LN(<strong>x</strong>) = γ ⊙ (<strong>x</strong> − μ) / √(σ² + ε) + β
+  </div>
+
+  <p>其中：</p>
+
+  <ul>
+    <li>μ：这个向量所有分量的均值（一个标量）；</li>
+    <li>σ²：这个向量所有分量的方差（一个标量）；</li>
+    <li>ε：一个极小的常数（如 10⁻⁵），防止标准差为 0 时除零，只为数值稳定；</li>
+    <li>γ（gamma）和 β（beta）：两个<mark>可学习</mark>的向量，长度等于 d_model。归一化之后再做一次"按分量缩放 + 平移"，让网络有权说"我不想被完全归一化"。</li>
+  </ul>
+
+  <h4>手算一个 4 维向量的 LayerNorm</h4>
+
+  <p>拿一个 4 维小向量完整算一遍：<strong>x</strong> = [2, 4, 4, 6]，为简单起见取 γ = [1,1,1,1]、β = [0,0,0,0]、ε ≈ 0。</p>
+
+  <p><strong>第一步：求均值。</strong></p>
+
+  <div class="formula">
+    μ = (2 + 4 + 4 + 6) / 4 = 16 / 4 = <strong>4</strong>
+  </div>
+
+  <p><strong>第二步：每个分量减均值。</strong></p>
+
+  <div class="formula">
+    <strong>x</strong> − μ = [2−4, 4−4, 4−4, 6−4] = [−2, 0, 0, 2]
+  </div>
+
+  <p><strong>第三步：求方差</strong>（各偏差平方的平均）：</p>
+
+  <div class="formula">
+    σ² = ((−2)² + 0² + 0² + 2²) / 4 = (4 + 0 + 0 + 4) / 4 = <strong>2</strong>
+  </div>
+
+  <p><strong>第四步：除以标准差。</strong> √2 ≈ 1.414：</p>
+
+  <div class="formula">
+    LN(<strong>x</strong>) = [−2/1.414, 0/1.414, 0/1.414, 2/1.414] ≈ [<strong>−1.414, 0, 0, 1.414</strong>]
+  </div>
+
+  <p>验算一下：新向量均值 = (−1.414 + 0 + 0 + 1.414)/4 = 0，方差 = (2 + 0 + 0 + 2)/4 = 1。完美归一。注意它保留了原来"两头高中间平"的<mark>形状信息</mark>，只是把音量调到了标准档。</p>
+
+  <p>如果 γ = [2, 2, 2, 2]、β = [1, 1, 1, 1]，结果就变成 [−1.828, 1, 1, 3.828]——网络通过学 γ 和 β，可以微调每个分量归一化后的尺度与偏移。</p>
+
+  <h4>LayerNorm 与 BatchNorm：按"行"还是按"列"？</h4>
+
+  <p>学过卷积网络的读者会问：这和 BatchNorm（批归一化）有什么区别？区别在<mark>归一化沿着哪个方向算均值方差</mark>：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th></th><th>BatchNorm</th><th>LayerNorm</th></tr></thead>
+      <tbody>
+        <tr><td>归一化方向</td><td>对<strong>每个特征</strong>，跨整个批次的样本算均值方差（"按列"）</td><td>对<strong>每个样本（每个词）</strong>，跨它自己的所有特征算（"按行"）</td></tr>
+        <tr><td>依赖批次大小？</td><td>是。批次小、或推理时只有一个样本，统计就不稳</td><td>否。每个词只依赖自己，批次大小、序列长度都无所谓</td></tr>
+        <tr><td>训练/推理行为</td><td>不一致（推理时用训练时累积的移动平均）</td><td>完全一致</td></tr>
+        <tr><td>主战场</td><td>计算机视觉（图像批次统计稳定）</td><td>NLP / Transformer</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>为什么 NLP 偏爱 LayerNorm？两个朴素理由。第一，<mark>句子长短不一</mark>：一批句子里有的 5 个词、有的 50 个词，BatchNorm 那种"跨样本统计同一个位置"的做法在参差不齐的序列上很难稳定。第二，<mark>推理时可能一次只处理一句话</mark>（比如你和 ChatGPT 单聊），BatchNorm 依赖"批"的统计量，单样本场景下行为会和训练时不一致；LayerNorm 只看当前这一个词向量自身，一句话、一个批次、一万个批次，行为完全相同。</p>
+
+  <h3><span class="sec-no">5.7</span> Pre-LN 与 Post-LN：归一化放在里面还是外面？</h3>
+
+  <p>残差连接和 LayerNorm 组合时有一个微妙的顺序问题，两种摆法都对 Transformer 的历史产生了深远影响：</p>
+
+  <ul>
+    <li><strong>Post-LN</strong>（2017 原论文的做法）：先残差相加，再归一化——<code>LN(x + Sublayer(x))</code>。归一化在残差之后（"post"）。</li>
+    <li><strong>Pre-LN</strong>（后来研究提出、现代大模型几乎标配）：先归一化输入，子层输出再直接加回原始 x——<code>x + Sublayer(LN(x))</code>。归一化在子层之前（"pre"）。</li>
+  </ul>
+
+  <div class="fig">
+    <svg viewBox="0 0 760 300" role="img" aria-label="Post-LN 与 Pre-LN 结构对比图" font-family="inherit">
+      <defs>
+        <marker id="arr-05b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+
+      <text x="170" y="28" text-anchor="middle" fill="var(--ink)" font-size="15">Post-LN（原版）</text>
+      <text x="570" y="28" text-anchor="middle" fill="var(--ink)" font-size="15">Pre-LN（现代）</text>
+
+      <rect x="120" y="45" width="100" height="34" rx="8" fill="var(--paper2)" stroke="var(--line)"/>
+      <text x="170" y="67" text-anchor="middle" fill="var(--ink)" font-size="13">x</text>
+      <line x1="170" y1="79" x2="170" y2="105" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-05b)"/>
+
+      <rect x="120" y="108" width="100" height="34" rx="8" fill="var(--accent)" opacity="0.2"/>
+      <rect x="120" y="108" width="100" height="34" rx="8" fill="none" stroke="var(--accent)"/>
+      <text x="170" y="130" text-anchor="middle" fill="var(--ink)" font-size="13">子层 S(·)</text>
+      <line x1="170" y1="142" x2="170" y2="168" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-05b)"/>
+
+      <rect x="120" y="171" width="100" height="34" rx="8" fill="var(--paper2)" stroke="var(--line)"/>
+      <text x="170" y="193" text-anchor="middle" fill="var(--ink)" font-size="13">x + S(x)</text>
+      <line x1="170" y1="205" x2="170" y2="231" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-05b)"/>
+
+      <rect x="120" y="234" width="100" height="34" rx="8" fill="var(--accent2)" opacity="0.2"/>
+      <rect x="120" y="234" width="100" height="34" rx="8" fill="none" stroke="var(--accent2)"/>
+      <text x="170" y="256" text-anchor="middle" fill="var(--ink)" font-size="13">LayerNorm</text>
+
+      <path d="M 120 62 C 70 62, 70 188, 118 188" fill="none" stroke="var(--accent3)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arr-05b)"/>
+      <text x="52" y="130" text-anchor="middle" fill="var(--accent3)" font-size="12">残差</text>
+
+      <rect x="520" y="45" width="100" height="34" rx="8" fill="var(--paper2)" stroke="var(--line)"/>
+      <text x="570" y="67" text-anchor="middle" fill="var(--ink)" font-size="13">x</text>
+      <line x1="570" y1="79" x2="570" y2="105" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-05b)"/>
+
+      <rect x="520" y="108" width="100" height="34" rx="8" fill="var(--accent2)" opacity="0.2"/>
+      <rect x="520" y="108" width="100" height="34" rx="8" fill="none" stroke="var(--accent2)"/>
+      <text x="570" y="130" text-anchor="middle" fill="var(--ink)" font-size="13">LayerNorm</text>
+      <line x1="570" y1="142" x2="570" y2="168" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-05b)"/>
+
+      <rect x="520" y="171" width="100" height="34" rx="8" fill="var(--accent)" opacity="0.2"/>
+      <rect x="520" y="171" width="100" height="34" rx="8" fill="none" stroke="var(--accent)"/>
+      <text x="570" y="193" text-anchor="middle" fill="var(--ink)" font-size="13">子层 S(·)</text>
+      <line x1="570" y1="205" x2="570" y2="231" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-05b)"/>
+
+      <rect x="520" y="234" width="100" height="34" rx="8" fill="var(--paper2)" stroke="var(--line)"/>
+      <text x="570" y="256" text-anchor="middle" fill="var(--ink)" font-size="13">x + S(LN(x))</text>
+
+      <path d="M 520 62 C 470 62, 470 251, 518 251" fill="none" stroke="var(--accent3)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arr-05b)"/>
+      <text x="452" y="130" text-anchor="middle" fill="var(--accent3)" font-size="12">残差</text>
+
+      <text x="290" y="130" fill="var(--muted)" font-size="12">归一化会把残差和</text>
+      <text x="290" y="148" fill="var(--muted)" font-size="12">子层输出一起洗一遍，</text>
+      <text x="290" y="166" fill="var(--muted)" font-size="12">层数深时主干道被</text>
+      <text x="290" y="184" fill="var(--muted)" font-size="12">反复"重新定标"，</text>
+      <text x="290" y="202" fill="var(--muted)" font-size="12">训练容易不稳，需要</text>
+      <text x="290" y="220" fill="var(--muted)" font-size="12">小心调学习率。</text>
+
+      <text x="700" y="130" fill="var(--muted)" font-size="12" text-anchor="end">残差从 x 直达输出，</text>
+      <text x="700" y="148" fill="var(--muted)" font-size="12" text-anchor="end">全程不被 LN 打断，</text>
+      <text x="700" y="166" fill="var(--muted)" font-size="12" text-anchor="end">梯度高速路畅通，</text>
+      <text x="700" y="184" fill="var(--muted)" font-size="12" text-anchor="end">几十层也能稳定训练，</text>
+      <text x="700" y="202" fill="var(--muted)" font-size="12" text-anchor="end">现代大模型标配。</text>
+    </svg>
+    <figcaption>图 5-2 Post-LN 与 Pre-LN 的顺序差异。注意 Pre-LN 中残差路径（虚线）从头到尾不被归一化打断。</figcaption>
+  </div>
+
+  <p>为什么 Pre-LN 更稳？关键还在那条"高速公路"。Post-LN 中，主干道上的信号每一层都要被 LN 重新洗一遍均值方差，深堆叠时这条通道被反复"重新定标"，训练初期梯度容易剧烈波动，往往需要配合精细的学习率预热（warmup）才能训起来。Pre-LN 中，<mark>x 的残差通路从第一层直通最后一层，中间不被任何 LN 截断</mark>，梯度可以畅通无阻地一路回传，所以几十层的模型也能直接开训。代价是 Pre-LN 每层"支路"贡献的变化比例不同，理论上表达上限略受影响——但实践中"训得动"远比"理论上限"重要。GPT-2 之后的绝大多数大模型（包括 LLaMA、GPT-3 谱系）都用 Pre-LN 或其亲戚 RMSNorm。</p>
+
+  <h3><span class="sec-no">5.8</span> 拼起来：一个编码器层的完整 Add &amp; Norm 数据流</h3>
+
+  <p>现在把本章和第 4 章的零件全部组装，得到一个标准编码器层（以原论文的 Post-LN 顺序为准）的完整数据流。输入是序列矩阵 X [6 × 512]（6 个词，每个 512 维）：</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 760 470" role="img" aria-label="完整 Add 与 Norm 数据流" font-family="inherit">
+      <defs>
+        <marker id="arr-05c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
+
+      <rect x="300" y="14" width="160" height="36" rx="8" fill="var(--paper2)" stroke="var(--line)"/>
+      <text x="380" y="37" text-anchor="middle" fill="var(--ink)" font-size="13">输入 X [6×512]</text>
+      <line x1="380" y1="50" x2="380" y2="76" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-05c)"/>
+
+      <rect x="280" y="79" width="200" height="40" rx="8" fill="var(--accent)" opacity="0.18"/>
+      <rect x="280" y="79" width="200" height="40" rx="8" fill="none" stroke="var(--accent)"/>
+      <text x="380" y="103" text-anchor="middle" fill="var(--ink)" font-size="13">多头注意力 [6×512]</text>
+      <line x1="380" y1="119" x2="380" y2="145" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-05c)"/>
+
+      <circle cx="380" cy="168" r="17" fill="var(--paper2)" stroke="var(--ink)" stroke-width="2"/>
+      <text x="380" y="173" text-anchor="middle" fill="var(--ink)" font-size="15">+</text>
+      <path d="M 300 32 C 180 32, 180 168, 360 168" fill="none" stroke="var(--accent3)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arr-05c)"/>
+      <text x="205" y="100" fill="var(--accent3)" font-size="12">残差：抄一份 X</text>
+      <line x1="380" y1="185" x2="380" y2="211" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-05c)"/>
+
+      <rect x="290" y="214" width="180" height="36" rx="8" fill="var(--accent2)" opacity="0.2"/>
+      <rect x="290" y="214" width="180" height="36" rx="8" fill="none" stroke="var(--accent2)"/>
+      <text x="380" y="237" text-anchor="middle" fill="var(--ink)" font-size="13">LayerNorm [6×512]</text>
+      <line x1="380" y1="250" x2="380" y2="276" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-05c)"/>
+
+      <rect x="280" y="279" width="200" height="40" rx="8" fill="var(--accent)" opacity="0.18"/>
+      <rect x="280" y="279" width="200" height="40" rx="8" fill="none" stroke="var(--accent)"/>
+      <text x="380" y="295" text-anchor="middle" fill="var(--ink)" font-size="13">FFN [6×512]→[6×2048]</text>
+      <text x="380" y="311" text-anchor="middle" fill="var(--ink)" font-size="13">→[6×512]</text>
+      <line x1="380" y1="319" x2="380" y2="345" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-05c)"/>
+
+      <circle cx="380" cy="368" r="17" fill="var(--paper2)" stroke="var(--ink)" stroke-width="2"/>
+      <text x="380" y="373" text-anchor="middle" fill="var(--ink)" font-size="15">+</text>
+      <path d="M 290 232 C 150 232, 150 368, 360 368" fill="none" stroke="var(--accent3)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arr-05c)"/>
+      <text x="188" y="300" fill="var(--accent3)" font-size="12">残差：抄一份 LN 输出</text>
+      <line x1="380" y1="385" x2="380" y2="411" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-05c)"/>
+
+      <rect x="290" y="414" width="180" height="36" rx="8" fill="var(--accent2)" opacity="0.2"/>
+      <rect x="290" y="414" width="180" height="36" rx="8" fill="none" stroke="var(--accent2)"/>
+      <text x="380" y="437" text-anchor="middle" fill="var(--ink)" font-size="13">LayerNorm [6×512] → 下一层</text>
+
+      <text x="530" y="100" fill="var(--muted)" font-size="12">① 词与词交流</text>
+      <text x="530" y="237" fill="var(--muted)" font-size="12">② 每个词独立深加工</text>
+      <text x="530" y="437" fill="var(--muted)" font-size="12">③ 输出形状不变，可继续堆叠</text>
+    </svg>
+    <figcaption>图 5-3 一个编码器层（Post-LN 顺序）的完整数据流。整个过程中张量形状始终是 [6×512]——形状不变，才能原样堆叠 6 层。</figcaption>
+  </div>
+
+  <p>用伪代码把这张图写成两行（对照原论文的 Post-LN）：</p>
+
+  <div class="formula">
+    <strong>h</strong>₁ = LN(<strong>X</strong> + MultiHeadAttn(<strong>X</strong>))<br>
+    <strong>h</strong>₂ = LN(<strong>h</strong>₁ + FFN(<strong>h</strong>₁))
+  </div>
+
+  <p>注意一个优美的性质：<mark>整个过程中张量形状永远是 [6 × 512]</mark>。形状不变，意味着这一层的输出可以原封不动地喂给下一个一模一样的层——这就是 Transformer"积木式"堆叠 6 层、12 层乃至 96 层的几何基础。下一章我们会把 6 块这样的积木叠起来，再加上解码器，拼出完整的机器翻译系统。</p>
+
+  <h3><span class="sec-no">5.9</span> 交互演示：亲眼看看残差与归一化的威力</h3>
+
+  <p>读到这里，"梯度高速公路"和"标准音量"对你来说可能还只是比喻。下面这个演示把它们变成看得见的曲线，一共三个实验。实验一：用滑块选择堆叠层数（1~30 层），打开或关闭"残差连接"，观察信号/梯度逐层衰减的对比——关闭时每层只剩 0.8 倍，30 层后衰减到约千分之一；打开时信号以 x + 0.2·f(x) 的方式传递，主干始终无损、支路还层层叠加。实验二：拖动 4 个滑块构造任意 4 维向量，实时看 LayerNorm 如何把它调成"均值 0、标准差 1"。实验三：迷你 FFN 沙盘，内置 5.4 节手算的那组权重，拖动输入向量和偏置 b₁，亲眼看 [1, 2] 如何经过"升维 → ReLU 筛选 → 压回"变成 [2, 5]。</p>
+
+  <div class="demo-frame" data-demo="demo-residual">正在加载交互演示…</div>
+
+  <p>建议的玩法：</p>
+
+  <ul>
+    <li>先把层数拉到 30，切换"残差连接"开关，注意最终层数值差了几个数量级——那就是梯度消失和有高速公路的区别。</li>
+    <li>把 LayerNorm 实验的 4 个滑块全部拉到同一数值（向量全相等），看看输出变成什么——方差为 0 时会发生什么？（演示里用 ε 保护了除零。）</li>
+    <li>把向量调成 [2, 4, 4, 6]，对照 5.6 节的手算结果。</li>
+    <li>在 FFN 沙盘里点「试试 b₁=[−3,0,−5,0]」，看 5.4 节提示框里"两个特征被清零"的场景真实发生；再自己调 b₁，让 4 个高维特征全部变成负数，看输出被 b₂ 独自决定。</li>
+  </ul>
+
+  <h3><span class="sec-no">5.10</span> 小结</h3>
+
+  <ul>
+    <li><strong>FFN</strong> 是每个词"独立思考"的车间：<code>FFN(x) = max(0, xW₁+b₁)W₂+b₂</code>，形状旅程 [512] → [2048] → [512]，先升维 4 倍便于分离特征、再压回原尺寸。</li>
+    <li>FFN 是 <strong>position-wise</strong> 的：同一个 FFN 独立作用于每个位置，词与词不交流——交流是注意力的职责。这种独立性带来了并行计算的便利。</li>
+    <li>FFN 占了每个编码器层约 2/3 的参数（约 210 万 vs 注意力约 105 万），常被认为是模型存储知识的地方。</li>
+    <li><strong>残差连接</strong> <code>x + Sublayer(x)</code> 像编辑的修订模式：信息不丢；反向时 ∂(x+F(x))/∂x = 1 + ∂F/∂x 中那个 "1" 构成梯度高速公路，治愈深层网络的梯度消失。</li>
+    <li><strong>LayerNorm</strong> 对每个词的向量单独做"减均值、除标准差"，再用可学习的 γ、β 微调；它按"行"归一化，与批次无关，这是它胜过 BatchNorm 成为 NLP 标配的原因。</li>
+    <li><strong>Post-LN</strong>（原版）= LN(x + Sublayer(x))；<strong>Pre-LN</strong>（现代）= x + Sublayer(LN(x))。Pre-LN 的残差通路不被归一化打断，深层训练更稳定，是现代大模型标配。</li>
+    <li>一个编码器层的完整数据流（Post-LN）：h₁ = LN(X + MHA(X))，h₂ = LN(h₁ + FFN(h₁))；全程形状不变，所以能像积木一样堆叠。</li>
+  </ul>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">常见误区</p>
+    <ul>
+      <li><strong>"FFN 里词与词会互相看到"</strong>——错。两次矩阵乘法只在特征维混合，每个位置完全独立。想交流请找注意力。</li>
+      <li><strong>"残差连接是为了让前向传播更快"</strong>——不是。它几乎不增加计算量（一次加法），它救的是<em>训练</em>（梯度回传）和<em>信息保留</em>，不是推理速度。</li>
+      <li><strong>"LayerNorm 是在整个批次上算的"</strong>——那是 BatchNorm。LayerNorm 只看当前这一个词向量自己的 512 个数字，批次里有多少句子、句子多长，都与它无关。</li>
+      <li><strong>"归一化把信息洗没了"</strong>——LN 保留向量的"形状"（分量间的相对大小关系），只调整尺度；何况 γ、β 给了网络"反悔"的能力。</li>
+      <li><strong>"升维是浪费，反正要压回来"</strong>——升维段配合 ReLU 才是 FFN 表达力的来源；没有中间的高维空间，两个线性层直接相乘就退化成一次线性变换。</li>
+    </ul>
+  </div>
+
+  <h3><span class="sec-no">5.11</span> 自测题</h3>
+
+  <details class="quiz">
+    <summary>① 原论文中 FFN 的参数量约为多少？为什么 FFN 最后必须压回 d_model 维？</summary>
+    <p>约 210 万（W₁: 512×2048，b₁: 2048，W₂: 2048×512，b₂: 512，合计 2,099,712）。必须压回 512 维有两个原因：其一，残差连接要求子层输出与输入形状相同才能相加；其二，输出要喂给下一个编码器层，形状必须保持不变才能堆叠。</p>
+  </details>
+
+  <details class="quiz">
+    <summary>② 设输出 y = x + F(x)，某一层 F 的导数 ∂F/∂x ≈ 0.01，那么梯度穿过这一层后大约保留多少？如果没有残差呢？</summary>
+    <p>有残差时 ∂y/∂x = 1 + 0.01 = 1.01，梯度几乎无损通过（甚至略放大）。没有残差时梯度要乘以 0.01，只剩百分之一；这样的层堆叠十几层后梯度就衰减到 10⁻²⁰ 量级，前面的层完全收不到训练信号。这就是残差连接治愈梯度消失的算术本质。</p>
+  </details>
+
+  <details class="quiz">
+    <summary>③ 为什么 NLP 模型普遍用 LayerNorm 而不是 BatchNorm？请给出至少两个理由。</summary>
+    <p>① NLP 批次内句子长短不一、padding 混杂，BatchNorm 跨样本统计同一位置的均值方差会不稳定，LayerNorm 只依赖每个词自身，与批次无关；② 推理时常常一次只处理一个样本，BatchNorm 的训练/推理行为不一致（需移动平均），LayerNorm 两种模式完全一致；③ Transformer 中不同位置（不同词）语义差异极大，把它们的统计量混在一起归一化本身就不合理。</p>
+  </details>
+
+</section>

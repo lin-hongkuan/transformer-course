@@ -1,0 +1,507 @@
+<section class="chapter" id="ch03">
+  <header class="ch-head">
+    <p class="ch-eyebrow">第 3 章 · 注意力机制</p>
+    <h2>注意力机制：让词和词互相"看一眼"</h2>
+    <p class="ch-lede">这是全书最重要的一章。Transformer 的全部魔力，来自一个叫"注意力（Attention）"的操作。本章用"图书馆查书"的类比建立直觉，然后用 3 个词、每个词 2 个数字的最小例子，把原论文公式 <code class="math">Attention(Q,K,V)=softmax(QKᵀ/√d_k)V</code> 里的每一步都亲手算一遍。读完这一章，你就握住了现代大语言模型的心脏。</p>
+  </header>
+
+  <h3><span class="sec-no">3.1</span> 从"读句子"说起：为什么词需要互相看</h3>
+  <p>回想<a href="#ch01" class="xref">第 1 章</a>的结论：RNN 像传话游戏，词要一个接一个排队处理，远处的信息传着传着就丢了。而<a href="#ch02" class="xref">第 2 章</a>告诉我们：每个词已经被表示成一个向量（一串数字），比如词嵌入加上位置编码之后，"猫"这个向量里既有"猫"的语义，也有"我在第 3 个位置"的信息。</p>
+  <p>但光有这些还不够。看这句中文：</p>
+  <div class="formula">我把<b>它</b>放在桌上，因为<b>它</b>太重了</div>
+  <p>句子里两个"它"指的是什么？人读这句话时，眼睛会不自觉地往回瞟，去寻找"它"指代的对象。也就是说，<mark>理解一个词，需要去看句子里的其他词</mark>。词与词之间需要一种直接对话的机制——不用排队传话，任何一个词都可以直接"看一眼"任何另一个词，并决定看多重。</p>
+  <p>再看几个例子，体会"词的新表示必须依赖上下文"这件事有多普遍：</p>
+  <ul>
+    <li>"<strong>苹果</strong>发布了新手机" vs "我吃了一斤<strong>苹果</strong>"——同一个词，前一句该多关注"发布""手机"，后一句该多关注"吃""一斤"。词义要靠邻居来锁定。</li>
+    <li>"小明给小红一本书，<strong>她</strong>很开心"——"她"是谁？必须回头找到"小红"。这种指代关系可能隔着好几个词，RNN 传话传到"她"时早就模糊了。</li>
+    <li>"他差点没摔倒"——"差点"和"没"组合起来意思反转，单个词的向量完全看不出这种化学反应。</li>
+  </ul>
+  <p>这个机制就是<mark>注意力（Attention）</mark>。它的核心思想一句话就能说完：</p>
+  <div class="callout callout-info">
+    <p class="callout-title">注意力的一句话定义</p>
+    <p>每个词拿着自己的"问题"去和句子里的每一个词（包括自己）的"标签"比对，算出相关度；然后按相关度为权重，把所有词的"内容"加权混合起来，得到这个词的新表示。</p>
+  </div>
+  <p>"问题""标签""内容"这三样东西，就是大名鼎鼎的 <strong>Query、Key、Value</strong>。下面先建立直觉，再上公式，再上数字。</p>
+  <div class="callout callout-tip">
+    <p class="callout-title">本章地图</p>
+    <p>3.2 图书馆类比 → 3.3 Q/K/V 从哪来 → 3.4 softmax 热身 → <strong>3.5 三词完整手算（本章灵魂）</strong>→ 3.6 为什么除以 √d_k → 3.7 对照原论文公式 → 3.8 热力图读法 → 3.9 自注意力 vs 交叉注意力 → 3.10 交互演示。建议准备纸笔，跟着 3.5 节算一遍。</p>
+  </div>
+
+  <h3><span class="sec-no">3.2</span> 直觉类比：在图书馆里查资料</h3>
+  <p>想象你走进一座巨大的图书馆，想搞懂一个问题。整个过程分四步：</p>
+  <ol>
+    <li><strong>你心里有一个问题</strong>：比如"猫科动物的驯化历史"。这就是 <strong>Query（查询向量）</strong>。</li>
+    <li><strong>每本书的书脊上贴着标签</strong>：写着这本书的关键词，比如"猫的考古""狗的饲养""微积分入门"。这就是 <strong>Key（键向量）</strong>。</li>
+    <li><strong>书的内容本身</strong>：标签只是用来检索的，真正有价值的是书页里的文字。这就是 <strong>Value（值向量）</strong>。</li>
+    <li><strong>你不可能把全馆的书都精读一遍</strong>：你把问题跟每本书的标签比对，越匹配的书分越高；然后按分数为比例，从各本书里"抽取"内容——最相关的那本抽 40%，次相关的抽 30%，完全无关的微积分教材抽 0%。抽出来的内容混合在一起，就是你这趟图书馆之行带走的"答案笔记"。</li>
+  </ol>
+  <p>把注意力机制逐项对照进去：</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>图书馆里的角色</th><th>注意力里的角色</th><th>本质</th></tr></thead>
+      <tbody>
+        <tr><td>你心里的问题</td><td><strong>Query</strong>（查询）</td><td>"我想找什么样的信息"</td></tr>
+        <tr><td>书脊上的标签</td><td><strong>Key</strong>（键）</td><td>"我能提供什么线索，用来被检索"</td></tr>
+        <tr><td>书的实际内容</td><td><strong>Value</strong>（值）</td><td>"我真正携带的信息，用来被取走"</td></tr>
+        <tr><td>问题与标签的匹配分</td><td><strong>注意力分数</strong>（点积）</td><td>相关度的度量</td></tr>
+        <tr><td>按分数分配的阅读比例</td><td><strong>注意力权重</strong>（softmax 之后）</td><td>一组和为 1 的百分比</td></tr>
+        <tr><td>混合后的答案笔记</td><td><strong>注意力输出</strong></td><td>Value 的加权和</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>还有一个类比同样好使：<strong>查字典</strong>。你拿着一个字（Query）去翻字典，字典里每个词条的词头（Key）用来定位，词条下的解释（Value）才是你取走的内容。数据库的键值查询、搜索引擎的检索，全是同一个套路。<mark>注意力的本质就是"可微分的软查询"</mark>：字典查询是找到唯一一个词条，注意力是对所有词条按相关度分配比例、混合取内容——因为神经网络需要每一步都能求导，所以必须"软"，不能"只选一本"。</p>
+  <div class="callout callout-info">
+    <p class="callout-title">为什么要"软"查询？（提前剧透第 7 章）</p>
+    <p>如果注意力是"只选相关度最高的那一个词"，那它就像一个二选一开关：选 A 还是选 B。训练时（见<a href="#ch07" class="xref">第 7 章</a>）模型需要知道"如果多给 B 一点关注，结果会变好还是变坏"——这就是梯度。但开关式的硬选择没有梯度可言：你没法对"选/不选"求导。软查询把所有词都留了一份比例，任何比例的微小调整都会平滑地影响输出，梯度才能一路流回每个词的向量，模型才学得动。这是整个深度学习里反复出现的套路：<strong>凡是需要学习的选择，都要做成软的、可微的</strong>。</p>
+  </div>
+  <p>先记住这个画面，后面的所有公式都只是把它翻译成数学：<strong>提问（Q）→ 对标签（K）→ 按匹配度分比例（softmax）→ 按比倒内容（V）→ 混合带走（输出）</strong>。</p>
+
+  <h3><span class="sec-no">3.3</span> Q、K、V 从哪来：同一个向量，三张面孔</h3>
+  <p>一个反直觉但极其重要的事实：<mark>Q、K、V 不是三份不同的数据，它们全都来自同一个输入</mark>。</p>
+  <p>设句子有 <code class="math">n</code> 个词，每个词经过嵌入层（见<a href="#ch02" class="xref">第 2 章</a>）得到一个 <code class="math">d_model</code> 维向量。把所有词向量堆起来，就是输入矩阵 <code class="math"><b>X</b></code>，形状是 <code class="math">[n × d_model]</code>。然后模型里存着三个可学习的权重矩阵 <code class="math"><b>W</b><sub>Q</sub>、<b>W</b><sub>K</sub>、<b>W</b><sub>V</sub></code>（训练时自动学出来的），做三次矩阵乘法：</p>
+  <div class="formula">
+    <b>Q</b> = <b>X</b><b>W</b><sub>Q</sub> &nbsp;&nbsp;&nbsp; <b>K</b> = <b>X</b><b>W</b><sub>K</sub> &nbsp;&nbsp;&nbsp; <b>V</b> = <b>X</b><b>W</b><sub>V</sub>
+  </div>
+  <p>打个比方：同一个词，像同一个员工，<mark>戴上三顶不同的帽子</mark>。当它戴着 Query 帽时，它负责"提问"——"我需要什么样的信息来理解自己？"；戴着 Key 帽时，它负责"自我宣传"——"我身上有这些特征，谁需要就来找我"；戴着 Value 帽时，它负责"交付货物"——"如果被选中，我就把这些内容交出去"。三个权重矩阵就是三顶帽子，把同一个词向量投影成三种角色。</p>
+  <p>用数字感受一下规模。原论文的 base 模型里 <code class="math">d_model = 512</code>，而每个注意力头（"头"的概念见<a href="#ch04" class="xref">第 4 章</a>，本章先按单头理解）有 <code class="math">d_k = d_v = 64</code>。一个 10 词的句子：</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>张量</th><th>形状</th><th>怎么来的</th><th>含义</th></tr></thead>
+      <tbody>
+        <tr><td><b>X</b></td><td>[10 × 512]</td><td>嵌入 + 位置编码（第 2 章）</td><td>10 个词，每个 512 维</td></tr>
+        <tr><td><b>W</b><sub>Q</sub>、<b>W</b><sub>K</sub></td><td>[512 × 64]</td><td>训练学出来的参数</td><td>"提问帽"和"标签帽"</td></tr>
+        <tr><td><b>Q</b> = <b>X</b><b>W</b><sub>Q</sub></td><td>[10 × 64]</td><td>矩阵乘法</td><td>10 个词各自的提问向量</td></tr>
+        <tr><td><b>K</b> = <b>X</b><b>W</b><sub>K</sub></td><td>[10 × 64]</td><td>矩阵乘法</td><td>10 个词各自的标签向量</td></tr>
+        <tr><td><b>V</b> = <b>X</b><b>W</b><sub>V</sub></td><td>[10 × 64]</td><td>矩阵乘法</td><td>10 个词各自的内容向量</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>在原论文的设定里（<code class="math">d_model=512</code>、单头时 <code class="math">d_k=d_v=64</code>），一个 10 词的句子会经历这样的形状变化：</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 760 340" role="img" aria-label="示意图：输入矩阵 X 分别乘以三个权重矩阵，得到 Q、K、V">
+      <defs>
+        <marker id="arr-03" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"></path>
+        </marker>
+      </defs>
+      <rect x="300" y="18" width="160" height="56" rx="10" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="380" y="42" text-anchor="middle" font-family="inherit" font-size="15" font-weight="700" fill="var(--ink)">输入 X</text>
+      <text x="380" y="62" text-anchor="middle" font-family="inherit" font-size="12" fill="var(--muted)">[n × d_model] 每个词一行</text>
+
+      <line x1="380" y1="74" x2="140" y2="130" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-03)"></line>
+      <line x1="380" y1="74" x2="380" y2="130" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-03)"></line>
+      <line x1="380" y1="74" x2="620" y2="130" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-03)"></line>
+
+      <text x="245" y="112" text-anchor="middle" font-family="inherit" font-size="12" fill="var(--muted)">× W_Q</text>
+      <text x="380" y="112" text-anchor="middle" font-family="inherit" font-size="12" fill="var(--muted)">× W_K</text>
+      <text x="515" y="112" text-anchor="middle" font-family="inherit" font-size="12" fill="var(--muted)">× W_V</text>
+
+      <rect x="60" y="132" width="160" height="56" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"></rect>
+      <text x="140" y="156" text-anchor="middle" font-family="inherit" font-size="15" font-weight="700" fill="var(--accent)">Q · 提问</text>
+      <text x="140" y="176" text-anchor="middle" font-family="inherit" font-size="12" fill="var(--muted)">[n × d_k]</text>
+
+      <rect x="300" y="132" width="160" height="56" rx="10" fill="var(--accent2-soft)" stroke="var(--accent2)"></rect>
+      <text x="380" y="156" text-anchor="middle" font-family="inherit" font-size="15" font-weight="700" fill="var(--accent2)">K · 标签</text>
+      <text x="380" y="176" text-anchor="middle" font-family="inherit" font-size="12" fill="var(--muted)">[n × d_k]</text>
+
+      <rect x="540" y="132" width="160" height="56" rx="10" fill="var(--accent3-soft)" stroke="var(--accent3)"></rect>
+      <text x="620" y="156" text-anchor="middle" font-family="inherit" font-size="15" font-weight="700" fill="var(--accent3)">V · 内容</text>
+      <text x="620" y="176" text-anchor="middle" font-family="inherit" font-size="12" fill="var(--muted)">[n × d_v]</text>
+
+      <text x="140" y="224" text-anchor="middle" font-family="inherit" font-size="12.5" fill="var(--ink)">"我想找什么样的信息？"</text>
+      <text x="380" y="224" text-anchor="middle" font-family="inherit" font-size="12.5" fill="var(--ink)">"我身上有什么特征？"</text>
+      <text x="620" y="224" text-anchor="middle" font-family="inherit" font-size="12.5" fill="var(--ink)">"我真正携带什么内容？"</text>
+
+      <rect x="60" y="252" width="640" height="66" rx="10" fill="var(--paper2)" stroke="var(--line)" stroke-dasharray="5 4"></rect>
+      <text x="380" y="278" text-anchor="middle" font-family="inherit" font-size="13" fill="var(--ink)">关键事实：三个矩阵都来自同一个 X</text>
+      <text x="380" y="300" text-anchor="middle" font-family="inherit" font-size="12" fill="var(--muted)">每个词都要和其他所有词（包括自己）交互，所以每个词同时有 Q、K、V 三个向量</text>
+    </svg>
+    <figcaption>图 3-1　Q、K、V 的诞生：同一个输入矩阵 X 乘上三个不同的可学习权重矩阵，得到同一批词的三种角色。</figcaption>
+  </figure>
+  <div class="callout callout-info">
+    <p class="callout-title">为什么偏要分三个角色？</p>
+    <p>你可能会问：既然都来自 X，直接拿 X 互相比不行吗？可以，但表达能力会差很多。原因有二：其一，"我是谁"和"我想找什么"是两回事——代词"它"的内容很贫乏，但它的 Query 必须学会表达"我在找一个名词"；如果 Query 和 Value 共用同一个向量，这两个任务就互相掣肘。其二，三个权重矩阵给了模型三组可学习的自由度，训练可以分别调整"怎么提问""怎么宣传""交付什么"，而不必妥协。这和数据库把"索引键"与"存储内容"分开设计是同一个道理。</p>
+  </div>
+
+  <h3><span class="sec-no">3.4</span> 热身：softmax 复习</h3>
+  <p>注意力里有一个关键工具：softmax。它的任务是<mark>把任意一组实数变成一组"和为 1 的百分比"</mark>，而且保持大小关系——原来大的，出来还是大。</p>
+  <p>直觉：softmax 先做两件简单的事。第一步，对每个数取指数 <code class="math">eˣ</code>。指数函数有两个好性质：任何数取完指数都变成正数；而且它会<mark>放大差距</mark>——2 和 1 只差 1，但 e²≈7.39 是 e¹≈2.72 的 2.7 倍。第二步，把每个指数除以所有指数之和，强行让总和等于 1。</p>
+  <div class="formula">
+    softmax(x<sub>i</sub>) = <span class="hl">e<sup>x<sub>i</sub></sup></span> <span class="op">/</span> Σ<sub>j</sub> e<sup>x<sub>j</sub></sup>
+  </div>
+  <p>手算一遍，用三个分数 <code class="math">2, 1, 0</code>：</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>输入 x</th><th>eˣ（取指数）</th><th>除以总和 11.1073</th><th>softmax 输出</th></tr></thead>
+      <tbody>
+        <tr><td>2</td><td>e² = 7.3891</td><td>7.3891 / 11.1073</td><td><strong>0.6652</strong></td></tr>
+        <tr><td>1</td><td>e¹ = 2.7183</td><td>2.7183 / 11.1073</td><td><strong>0.2447</strong></td></tr>
+        <tr><td>0</td><td>e⁰ = 1.0000</td><td>1.0000 / 11.1073</td><td><strong>0.0900</strong></td></tr>
+        <tr><td colspan="3"><strong>合计</strong>（指数之和 = 7.3891 + 2.7183 + 1.0000 = 11.1073）</td><td><strong>1.0000</strong> ✓</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>三个输出 0.6652、0.2447、0.0900 都在 0 到 1 之间，加起来正好等于 1，而且大小顺序和输入一致。这就是注意力需要的"权重"。指数带来的放大效应也很明显：第一名拿走了约 66.5%，是第二名（约 24.5%）的近三倍，而原始分数只差 1。<mark>分数差距越大，softmax 越接近"赢家通吃"</mark>——这一点在 3.6 节讲 √d_k 时还会回来。</p>
+  <div class="callout callout-tip">
+    <p class="callout-title">工程细节：为什么代码里先减最大值</p>
+    <p>实际实现里，softmax 会先对每个输入减去这一行的最大值再取指数：<code class="math">softmax(xᵢ) = e^{xᵢ−m} / Σ e^{xⱼ−m}</code>，其中 <code class="math">m = max(x)</code>。数学上结果完全相同（分子分母同除 eᵐ），但可以防止分数很大时 eˣ 溢出计算机的浮点范围。本章手算的数字都很小，不需要这一招；下面的演示代码里也隐含了同样的处理。你知道有这么个"数值稳定化"技巧即可。</p>
+  </div>
+  <p>还没过瘾？下面这个小实验室让你亲手把 5 个分数"捏"成不同形状，再看看温度旋钮如何把分布拧紧或摊平——这正是 <a href="#ch08" class="xref">第 8 章</a>里温度采样的主角。</p>
+  <div class="demo-frame" data-demo="demo-softmax">正在加载交互演示…</div>
+
+  <h3><span class="sec-no">3.5</span> 灵魂手算：3 个词的完整注意力</h3>
+  <p>现在做本章最重要的事：把注意力的每一步用真实数字算出来。为了让你能拿着纸笔跟上，我们把规模缩到最小：</p>
+  <ul>
+    <li>句子只有 3 个词：<strong>「我 爱 猫」</strong>；</li>
+    <li>每个词的 Q、K 向量只有 2 维（<code class="math">d_k = 2</code>），V 向量也只有 2 维（<code class="math">d_v = 2</code>）；</li>
+    <li>真实模型里这些向量由 <code class="math"><b>XW</b><sub>Q</sub></code> 等矩阵乘法得到（3.3 节），这里我们直接给出算好的 Q、K、V，专注于注意力本身的计算。</li>
+  </ul>
+  <p>先看"剧本"全貌，再逐幕演出：</p>
+  <div class="formula">
+    <b>Q</b><b>K</b><sup>ᵀ</sup> <span class="op">→</span> 除以 √d_k <span class="op">→</span> softmax <span class="op">→</span> 得到权重矩阵 <b>A</b> <span class="op">→</span> <b>A</b> 乘 <b>V</b> <span class="op">→</span> 输出 <b>O</b>
+  </div>
+
+  <figure class="fig">
+    <svg viewBox="0 0 760 300" role="img" aria-label="数据流图：Q 乘 K 转置得到分数矩阵，缩放、softmax 后乘 V 得到输出，各步标注张量形状">
+      <defs>
+        <marker id="arr-03b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"></path>
+        </marker>
+      </defs>
+      <rect x="10" y="30" width="86" height="50" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"></rect>
+      <text x="53" y="50" text-anchor="middle" font-family="inherit" font-size="13" font-weight="700" fill="var(--accent)">Q</text>
+      <text x="53" y="68" text-anchor="middle" font-family="inherit" font-size="11" fill="var(--muted)">[3×2]</text>
+      <rect x="10" y="96" width="86" height="50" rx="8" fill="var(--accent2-soft)" stroke="var(--accent2)"></rect>
+      <text x="53" y="116" text-anchor="middle" font-family="inherit" font-size="13" font-weight="700" fill="var(--accent2)">Kᵀ</text>
+      <text x="53" y="134" text-anchor="middle" font-family="inherit" font-size="11" fill="var(--muted)">[2×3]</text>
+
+      <line x1="96" y1="88" x2="138" y2="88" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-03b)"></line>
+
+      <rect x="140" y="58" width="110" height="60" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="195" y="82" text-anchor="middle" font-family="inherit" font-size="13" font-weight="700" fill="var(--ink)">原始分数</text>
+      <text x="195" y="102" text-anchor="middle" font-family="inherit" font-size="11" fill="var(--muted)">[3×3] 点积</text>
+
+      <line x1="250" y1="88" x2="292" y2="88" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-03b)"></line>
+
+      <rect x="294" y="58" width="110" height="60" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="349" y="82" text-anchor="middle" font-family="inherit" font-size="13" font-weight="700" fill="var(--ink)">÷ √d_k</text>
+      <text x="349" y="102" text-anchor="middle" font-family="inherit" font-size="11" fill="var(--muted)">[3×3] ÷ 1.414</text>
+
+      <line x1="404" y1="88" x2="446" y2="88" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-03b)"></line>
+
+      <rect x="448" y="58" width="120" height="60" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"></rect>
+      <text x="508" y="78" text-anchor="middle" font-family="inherit" font-size="13" font-weight="700" fill="var(--accent)">softmax</text>
+      <text x="508" y="98" text-anchor="middle" font-family="inherit" font-size="11" fill="var(--muted)">权重 A [3×3]</text>
+
+      <line x1="568" y1="88" x2="610" y2="88" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-03b)"></line>
+
+      <rect x="612" y="58" width="66" height="60" rx="8" fill="var(--accent3-soft)" stroke="var(--accent3)"></rect>
+      <text x="645" y="82" text-anchor="middle" font-family="inherit" font-size="13" font-weight="700" fill="var(--accent3)">× V</text>
+      <text x="645" y="102" text-anchor="middle" font-family="inherit" font-size="11" fill="var(--muted)">[3×2]</text>
+
+      <rect x="578" y="170" width="100" height="50" rx="8" fill="var(--accent3-soft)" stroke="var(--accent3)"></rect>
+      <text x="628" y="190" text-anchor="middle" font-family="inherit" font-size="13" font-weight="700" fill="var(--accent3)">V</text>
+      <text x="628" y="208" text-anchor="middle" font-family="inherit" font-size="11" fill="var(--muted)">[3×2]</text>
+      <line x1="628" y1="170" x2="645" y2="120" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-03b)"></line>
+
+      <line x1="645" y1="118" x2="645" y2="148" stroke="var(--muted)" stroke-width="0"></line>
+
+      <rect x="300" y="170" width="140" height="60" rx="8" fill="var(--paper2)" stroke="var(--accent)"></rect>
+      <text x="370" y="194" text-anchor="middle" font-family="inherit" font-size="13" font-weight="700" fill="var(--ink)">输出 O</text>
+      <text x="370" y="214" text-anchor="middle" font-family="inherit" font-size="11" fill="var(--muted)">[3×2] 每行一个词</text>
+      <line x1="560" y1="104" x2="440" y2="180" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr-03b)"></line>
+
+      <text x="20" y="270" font-family="inherit" font-size="12" fill="var(--muted)">形状检查：Q[3×2]·Kᵀ[2×3] → [3×3]；A[3×3]·V[3×2] → O[3×2]。行数始终等于词数。</text>
+    </svg>
+    <figcaption>图 3-2　缩放点积注意力的数据流：先把 Query 和所有 Key 比对成一张 [3×3] 的"相关度表"，缩放并 softmax 成行和为 1 的权重表，再用它去加权混合 V。本章接下来亲手算出这张表的每一个格子。</figcaption>
+  </figure>
+
+  <h4>第 0 步：给出 Q、K、V 的具体数值</h4>
+  <p>下面就是本例的全部输入。每一行是一个词的向量（你可以把它理解成 3.3 节的矩阵乘法已经算完的结果）。数字是手工挑选的，目的是让点积好算、且三行三个词能展现出三种不同的关注模式：</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>词</th><th>Query（提问）</th><th>Key（标签）</th><th>Value（内容）</th></tr></thead>
+      <tbody>
+        <tr><td>我</td><td>(1, 0)</td><td>(1, 0)</td><td>(1, 0)</td></tr>
+        <tr><td>爱</td><td>(0, 1)</td><td>(0.5, 1)</td><td>(0, 1)</td></tr>
+        <tr><td>猫</td><td>(1, 1)</td><td>(0.6, 0.5)</td><td>(1, 1)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>写成矩阵（每行一个词，共 3 行）：</p>
+  <div class="formula" style="font-size:.95rem">
+    <b>Q</b> = [[1,0],[0,1],[1,1]] &nbsp;&nbsp;
+    <b>K</b> = [[1,0],[0.5,1],[0.6,0.5]] &nbsp;&nbsp;
+    <b>V</b> = [[1,0],[0,1],[1,1]]
+  </div>
+
+  <h4>第 1 步：计算 QKᵀ —— 每个 Query 和每个 Key 做点积</h4>
+  <p><strong>点积复习</strong>（预备知识，见<a href="#ch00" class="xref">第 0 章</a>）：两个向量对应位置相乘再相加，例如 <code class="math">(1, 0) · (0.5, 1) = 1×0.5 + 0×1 = 0.5</code>。点积越大，两个向量方向越一致，直觉上就是"问题和标签越匹配"。</p>
+  <p>为什么是点积而不是别的？可以从几何上理解：两个向量的点积等于它们的长度乘以夹角的余弦。方向越一致的向量，点积越大；垂直的点积为 0；反向的为负。用它来度量"Query 想要的方向"和"Key 宣称的方向"有多一致，再自然不过。而且点积只是一堆乘加，GPU 算起来飞快。</p>
+  <p>矩阵乘法 <code class="math"><b>Q</b><b>K</b><sup>ᵀ</sup></code> 的第 <code class="math">i</code> 行第 <code class="math">j</code> 列，就是"第 i 个词的 Query"点乘"第 j 个词的 Key"。Kᵀ 是 K 的转置（行列互换），目的是让"每个 Q 行向量"能和"每个 K 行向量"两两点积。逐个算：</p>
+  <ul>
+    <li>我→我：(1,0)·(1,0) = 1×1 + 0×0 = <strong>1.0</strong>；我→爱：(1,0)·(0.5,1) = 0.5 + 0 = <strong>0.5</strong>；我→猫：(1,0)·(0.6,0.5) = 0.6 + 0 = <strong>0.6</strong></li>
+    <li>爱→我：(0,1)·(1,0) = 0 + 0 = <strong>0.0</strong>；爱→爱：(0,1)·(0.5,1) = 0 + 1 = <strong>1.0</strong>；爱→猫：(0,1)·(0.6,0.5) = 0 + 0.5 = <strong>0.5</strong></li>
+    <li>猫→我：(1,1)·(1,0) = 1 + 0 = <strong>1.0</strong>；猫→爱：(1,1)·(0.5,1) = 0.5 + 1 = <strong>1.5</strong>；猫→猫：(1,1)·(0.6,0.5) = 0.6 + 0.5 = <strong>1.1</strong></li>
+  </ul>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>原始分数 QKᵀ</th><th>K：我</th><th>K：爱</th><th>K：猫</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Q：我</strong></td><td>1.0</td><td>0.5</td><td>0.6</td></tr>
+        <tr><td><strong>Q：爱</strong></td><td>0.0</td><td>1.0</td><td>0.5</td></tr>
+        <tr><td><strong>Q：猫</strong></td><td>1.0</td><td><strong>1.5</strong></td><td>1.1</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>先读一眼这张表（softmax 之前就能读出趋势）："我"最关注自己（1.0）；"爱"最关注自己（1.0），对"我"毫无兴趣（0.0）；"猫"对三者都有兴趣，最喜欢"爱"（1.5）。</p>
+
+  <h4>第 2 步：除以缩放因子 √d_k</h4>
+  <p>本例 <code class="math">d_k = 2</code>，所以 <code class="math">√d_k = √2 ≈ 1.4142</code>。把上面每个数除以 1.4142（为什么必须除，下一节专门讲）：</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>缩放后分数</th><th>K：我</th><th>K：爱</th><th>K：猫</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Q：我</strong></td><td>1.0/1.4142 = 0.7071</td><td>0.5/1.4142 = 0.3536</td><td>0.6/1.4142 = 0.4243</td></tr>
+        <tr><td><strong>Q：爱</strong></td><td>0.0000</td><td>0.7071</td><td>0.3536</td></tr>
+        <tr><td><strong>Q：猫</strong></td><td>0.7071</td><td>1.0607</td><td>0.7778</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>第 3 步：对每一行做 softmax，得到注意力权重矩阵 A</h4>
+  <p>对<mark>每一行</mark>（每个 Query 那一行）单独做 softmax。以第 1 行（"我"的视角）为例，输入是 (0.7071, 0.3536, 0.4243)：</p>
+  <ul>
+    <li>取指数：e<sup>0.7071</sup> = 2.0281，e<sup>0.3536</sup> = 1.4242，e<sup>0.4243</sup> = 1.5285</li>
+    <li>求和：2.0281 + 1.4242 + 1.5285 = 4.9808</li>
+    <li>归一化：2.0281/4.9808 = <strong>0.4072</strong>；1.4242/4.9808 = <strong>0.2859</strong>；1.5285/4.9808 = <strong>0.3069</strong></li>
+  </ul>
+  <p>另外两行同样操作，得到完整的<mark>注意力权重矩阵 <b>A</b></mark>（第 2 行：e⁰=1.0000、e<sup>0.7071</sup>=2.0281、e<sup>0.3536</sup>=1.4242，和 4.4523，归一化得 0.2246/0.4555/0.3199；第 3 行：e<sup>0.7071</sup>=2.0281、e<sup>1.0607</sup>=2.8884、e<sup>0.7778</sup>=2.1767，和 7.0932，归一化得 0.2859/0.4072/0.3069）：</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>权重 A（每行和为 1）</th><th>→ 我</th><th>→ 爱</th><th>→ 猫</th><th>行和</th></tr></thead>
+      <tbody>
+        <tr><td><strong>我 的关注分配</strong></td><td>0.4072</td><td>0.2859</td><td>0.3069</td><td>1.0000 ✓</td></tr>
+        <tr><td><strong>爱 的关注分配</strong></td><td>0.2246</td><td>0.4555</td><td>0.3199</td><td>1.0000 ✓</td></tr>
+        <tr><td><strong>猫 的关注分配</strong></td><td>0.2859</td><td>0.4072</td><td>0.3069</td><td>1.0000 ✓</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>读法：第 3 行是说，"猫"把自己 40.72% 的注意力给了"爱"，30.69% 给了自己，28.59% 给了"我"。每个词的"注意力预算"恰好是 100%。</p>
+
+  <h4>第 4 步：权重矩阵 A 乘 V —— 加权混合内容</h4>
+  <p>最后一步，用权重去混合 Value。<code class="math"><b>O</b> = <b>A</b><b>V</b></code>，第 i 行的输出 = A 第 i 行的三个权重分别乘三个词的 V 向量再相加。逐词算：</p>  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>输出</th><th>计算过程</th><th>结果</th></tr></thead>
+      <tbody>
+        <tr><td><strong>我 的新表示</strong></td><td>0.4072×(1,0) + 0.2859×(0,1) + 0.3069×(1,1)</td><td>(0.4072+0.3069, 0.2859+0.3069) = <strong>(0.7141, 0.5928)</strong></td></tr>
+        <tr><td><strong>爱 的新表示</strong></td><td>0.2246×(1,0) + 0.4555×(0,1) + 0.3199×(1,1)</td><td>(0.2246+0.3199, 0.4555+0.3199) = <strong>(0.5445, 0.7754)</strong></td></tr>
+        <tr><td><strong>猫 的新表示</strong></td><td>0.2859×(1,0) + 0.4072×(0,1) + 0.3069×(1,1)</td><td>(0.2859+0.3069, 0.4072+0.3069) = <strong>(0.5928, 0.7141)</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>完工。每个词的新表示都是全句 Value 的加权和——<mark>"我"的新向量里混进了"爱"和"猫"的内容</mark>。这就是"上下文相关的词表示"：同一个词在不同句子里，因为注意力权重不同，输出向量也不同。至此，你已经完整手算了一遍缩放点积注意力。</p>
+  <p>回头看，整个机制其实只用了三种运算：<strong>矩阵乘法、除以一个常数、逐行 softmax</strong>——没有循环、没有分支、没有任何"排队等前一个词"。这正是它能在 GPU 上飞速并行的原因，也是它能取代 RNN 的工程基础。</p>
+  <div class="callout callout-tip">
+    <p class="callout-title">亲手验证一下</p>
+    <p>拿纸笔把"爱"那一行重算一遍：0.2246×1 + 0.4555×0 + 0.3199×1 = 0.5445，0.2246×0 + 0.4555×1 + 0.3199×1 = 0.7753 ≈ 0.7754（末位差是四舍五入造成的）。如果你算出来的数和表里一致，说明你已经真正掌握了这个机制。</p>
+  </div>
+
+  <h3><span class="sec-no">3.6</span> 为什么要除以 √d_k？</h3>
+  <p>公式里那个 <code class="math">√d_k</code> 看起来不起眼，却关系到模型能不能训练起来。论证分两步：先看点积本身有多大，再看大数字对 softmax 做了什么。</p>
+  <p><strong>第一步：点积的方差随维度线性增长。</strong>假设 q 和 k 各有 <code class="math">d_k</code> 个分量，每个分量都是均值为 0、方差为 1 的独立随机数。点积 <code class="math">q·k = Σ qᵢkᵢ</code> 是 <code class="math">d_k</code> 个乘积之和。每个乘积 <code class="math">qᵢkᵢ</code> 的方差是 1（两个方差为 1 的独立变量之积的方差仍为 1），独立变量相加时方差直接相加，所以：</p>
+  <div class="formula">
+    Var(q·k) = d_k &nbsp;&nbsp;⇒&nbsp;&nbsp; 标准差 = <span class="hl">√d_k</span>
+  </div>
+  <p>也就是说，维度越大，点积的"典型大小"就越大，大约按 <code class="math">√d_k</code> 的尺度膨胀。用具体数字感受一下这个膨胀有多快：</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>d_k</th><th>√d_k</th><th>点积分数的典型波动幅度</th><th>后果</th></tr></thead>
+      <tbody>
+        <tr><td>2（本章手算例）</td><td>1.41</td><td>±1.4 左右</td><td>几乎没影响</td></tr>
+        <tr><td>64（原论文）</td><td>8</td><td>±8 左右</td><td>softmax 明显变尖锐</td></tr>
+        <tr><td>512（d_model）</td><td>22.6</td><td>±23 左右</td><td>权重趋近 one-hot</td></tr>
+        <tr><td>10000（假想）</td><td>100</td><td>±100 量级</td><td>softmax 完全饱和</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>把点积除以 √d_k，恰好把这个膨胀抵消掉，让任何维度下缩放后的分数方差都回到 1 左右。</p>
+  <p><strong>第二步：大分数会把 softmax 推进"饱和区"，梯度消失。</strong>回忆 3.4 节：softmax 会放大差距。当输入分数都很温和时，它输出一组均衡的权重；当输入分数巨大时，它会变成"赢家通吃"——最大的那个拿走几乎全部权重。看对比：</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>三个原始分数</th><th>不缩放直接 softmax</th><th>除以 √64 = 8 再 softmax</th></tr></thead>
+      <tbody>
+        <tr><td>(35.9, 2.3, −5.1)</td><td>(1.0000, 0.0000, 0.0000)</td><td>(0.9794, 0.0147, 0.0059)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>不缩放时，输出是 (1, 0, 0) ——一个词的权重是 100%，其余全是 0%。这对训练是灾难：权重为 0 意味着"这条路完全没被使用"，反向传播时梯度也几乎为 0（softmax 在饱和区的导数趋近于 0），模型学不到东西，就像你被锁死在"只读一本书"的状态，再也听不进别的意见。缩放之后，权重分布温和得多，每条路径都有梯度流过，模型才能同时比较"多看谁一点"的细微差别。</p>
+  <p>可以再补一个几何直觉：softmax 对"差距"敏感，而对"整体大小"不敏感——给所有分数同时加上一个常数，softmax 结果不变（分子分母的 e<sup>c</sup> 约掉了）。但乘法的缩放会真实改变差距：分数越大，相对差距被指数放得越大。√d_k 缩放的本质就是把"差距"维持在 softmax 最敏感、梯度最充足的舒适区。</p>
+  <div class="callout callout-info">
+    <p class="callout-title">一句话记住</p>
+    <p>除以 √d_k 不是为了让数字好看，而是为了<mark>把 softmax 留在"能学到东西"的温和区间</mark>。维度越高，这个缩放越不可缺少。</p>
+  </div>
+
+  <h3><span class="sec-no">3.7</span> 对照原论文：这就是公式本身</h3>
+  <p>把刚才手算的四步压缩成一行，就是 Vaswani 等人在 2017 年论文《Attention Is All You Need》中的公式（论文第 3.2.1 节，"Scaled Dot-Product Attention"）：</p>
+  <div class="formula">
+    Attention(<b>Q</b>, <b>K</b>, <b>V</b>) = softmax<span class="op">(</span> <b>Q</b><b>K</b><sup>ᵀ</sup> <span class="op">/</span> <span class="hl">√d_k</span> <span class="op">)</span> <b>V</b>
+  </div>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>公式里的符号</th><th>对应我们手算的哪一步</th><th>本例数值</th><th>真实模型中的形状</th></tr></thead>
+      <tbody>
+        <tr><td><code class="math"><b>Q</b><b>K</b><sup>ᵀ</sup></code></td><td>第 1 步：每个 Query 点乘每个 Key</td><td>3×3 原始分数表</td><td>[n × n]，10 词时是 10×10</td></tr>
+        <tr><td><code class="math">/ √d_k</code></td><td>第 2 步：除以缩放因子</td><td>÷ 1.4142</td><td>÷ √64 = 8</td></tr>
+        <tr><td><code class="math">softmax(·)</code></td><td>第 3 步：逐行归一化为权重</td><td>权重矩阵 A（行和=1）</td><td>[n × n]，每行和为 1</td></tr>
+        <tr><td><code class="math">(·)<b>V</b></code></td><td>第 4 步：加权混合 Value</td><td>输出 O</td><td>[n × d_v]，10×64</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>原论文还对比过另一种注意力（加性注意力，additive attention），结论是缩放点积注意力效果相当但<mark>快得多、省内存</mark>——因为整个计算就是两次矩阵乘法，而矩阵乘法是 GPU 最擅长的事。这也是为什么"注意力"能扛起现代大模型：它不仅有效，而且天生为并行计算设计。回想第 1 章 RNN 的串行瓶颈：<code class="math"><b>Q</b><b>K</b><sup>ᵀ</sup></code> 把"每个词看每个词"的所有比较一次性算完，没有任何排队。</p>
+
+  <h3><span class="sec-no">3.8</span> 读懂注意力热力图</h3>
+  <p>研究者和工程师最常用的"注意力透视仪"是<mark>热力图（heatmap）</mark>：把权重矩阵 A 画成一张格子图，格子颜色越深，权重越大。约定俗成的读法：</p>
+  <ul>
+    <li><strong>行 = 谁在提问</strong>（Query 来自哪个词）；<strong>列 = 看谁</strong>（Key 来自哪个词）；</li>
+    <li>每一行是一组 softmax 权重，所以<mark>每一行的格子加起来恒等于 1</mark>（列方向没有这个性质）；</li>
+    <li>第 i 行第 j 列的深色格子读作："理解第 i 个词时，模型分了很多注意力给第 j 个词"。</li>
+  </ul>
+
+  <figure class="fig">
+    <svg viewBox="0 0 760 300" role="img" aria-label="注意力权重热力图示例：行是 Query，列是 Key，颜色深浅表示权重大小">
+      <text x="180" y="28" text-anchor="middle" font-family="inherit" font-size="13" fill="var(--muted)">Key →（看谁）</text>
+      <text x="120" y="62" text-anchor="middle" font-family="inherit" font-size="13" fill="var(--ink)">我</text>
+      <text x="190" y="62" text-anchor="middle" font-family="inherit" font-size="13" fill="var(--ink)">爱</text>
+      <text x="260" y="62" text-anchor="middle" font-family="inherit" font-size="13" fill="var(--ink)">猫</text>
+      <text x="70" y="100" text-anchor="middle" font-family="inherit" font-size="13" fill="var(--ink)">我</text>
+      <text x="70" y="170" text-anchor="middle" font-family="inherit" font-size="13" fill="var(--ink)">爱</text>
+      <text x="70" y="240" text-anchor="middle" font-family="inherit" font-size="13" fill="var(--ink)">猫</text>
+      <text x="30" y="170" text-anchor="middle" font-family="inherit" font-size="13" fill="var(--muted)" transform="rotate(-90 30 170)">Query →（谁提问）</text>
+
+      <g font-family="inherit" font-size="12" text-anchor="middle">
+        <rect x="90" y="76" width="62" height="62" rx="6" fill="var(--heat-hi)" fill-opacity="0.41"></rect><text x="121" y="111" fill="var(--ink)">.41</text>
+        <rect x="160" y="76" width="62" height="62" rx="6" fill="var(--heat-hi)" fill-opacity="0.29"></rect><text x="191" y="111" fill="var(--ink)">.29</text>
+        <rect x="230" y="76" width="62" height="62" rx="6" fill="var(--heat-hi)" fill-opacity="0.31"></rect><text x="261" y="111" fill="var(--ink)">.31</text>
+        <rect x="90" y="146" width="62" height="62" rx="6" fill="var(--heat-hi)" fill-opacity="0.22"></rect><text x="121" y="181" fill="var(--ink)">.22</text>
+        <rect x="160" y="146" width="62" height="62" rx="6" fill="var(--heat-hi)" fill-opacity="0.46"></rect><text x="191" y="181" fill="var(--ink)">.46</text>
+        <rect x="230" y="146" width="62" height="62" rx="6" fill="var(--heat-hi)" fill-opacity="0.32"></rect><text x="261" y="181" fill="var(--ink)">.32</text>
+        <rect x="90" y="216" width="62" height="62" rx="6" fill="var(--heat-hi)" fill-opacity="0.29"></rect><text x="121" y="251" fill="var(--ink)">.29</text>
+        <rect x="160" y="216" width="62" height="62" rx="6" fill="var(--heat-hi)" fill-opacity="0.41"></rect><text x="191" y="251" fill="var(--ink)">.41</text>
+        <rect x="230" y="216" width="62" height="62" rx="6" fill="var(--heat-hi)" fill-opacity="0.31"></rect><text x="261" y="251" fill="var(--ink)">.31</text>
+      </g>
+
+      <rect x="330" y="76" width="14" height="202" rx="4" fill="var(--heat-lo)"></rect>
+      <rect x="330" y="76" width="14" height="100" rx="4" fill="var(--heat-hi)" fill-opacity="0.5"></rect>
+      <text x="352" y="86" font-family="inherit" font-size="11" fill="var(--muted)">高</text>
+      <text x="352" y="276" font-family="inherit" font-size="11" fill="var(--muted)">低</text>
+
+      <text x="400" y="110" font-family="inherit" font-size="13" fill="var(--ink)">读图练习：</text>
+      <text x="400" y="140" font-family="inherit" font-size="12.5" fill="var(--muted)">· 对角线深 → 词最关注自己（常见）</text>
+      <text x="400" y="168" font-family="inherit" font-size="12.5" fill="var(--muted)">· "猫"那一行第二列深 →</text>
+      <text x="412" y="190" font-family="inherit" font-size="12.5" fill="var(--muted)">"猫"分了大量注意力给"爱"</text>
+      <text x="400" y="218" font-family="inherit" font-size="12.5" fill="var(--muted)">· 某一行整行都浅 → 这个词"雨露均沾"，</text>
+      <text x="412" y="240" font-family="inherit" font-size="12.5" fill="var(--muted)">没有明确关注对象</text>
+    </svg>
+    <figcaption>图 3-3　用 3.5 节算出的权重矩阵 A 画成的热力图（为清晰起见标了两位小数的近似值）。下面 demo 里的热力图会实时计算，颜色从浅到深渐变。</figcaption>
+  </figure>
+
+  <h4>真实训练出来的注意力长什么样？</h4>
+  <p>上面的例子里权重是我们手工设计的。真实模型训练之后，热力图常常会出现几种非常有"语言学味道"的模式，你在 3.10 节的演示和<a href="#ch04" class="xref">第 4 章</a>的多头演示里都能试着找一找：</p>
+  <ul>
+    <li><strong>对角线模式</strong>：每个词最关注自己。这在底层很常见——先把自己"扶正"再说。</li>
+    <li><strong>指代模式</strong>：代词（"它""她"）那一行，深色格子落在被指代的名词上。这是注意力最经典的本事。</li>
+    <li><strong>邻居模式</strong>：深色格子集中在对角线附近——某些头只关心"前一个词/后一个词"，承担了类似 n-gram 的局部工作。</li>
+    <li><strong>分隔符模式</strong>：大量格子挤在句首符号或标点那一列。这通常是模型没找到明确关注对象时的"默认停靠位"，不必过度解读。</li>
+    <li><strong>长程搭配</strong>：动词跨过一长串修饰语，把注意力准确地投给它的主语或宾语——这正是 RNN 做不到、注意力一做就成的长程依赖。</li>
+  </ul>
+  <div class="callout callout-warn">
+    <p class="callout-title">警示：注意力权重 ≠ 解释</p>
+    <p>看到"猫关注了爱"，可以直觉地理解为"模型认为两者相关"，但学术界对"注意力权重能否当作模型决策的解释"有持续争论（有论文专门论证 attention is not explanation）。权重只是中间计算的一环，经过后续多层变换后，它对最终输出的真实贡献未必和权重数字成正比。读热力图时把它当作<strong>线索</strong>而不是<strong>证据</strong>。</p>
+  </div>
+
+  <h3><span class="sec-no">3.9</span> 自注意力与交叉注意力（预告）</h3>
+  <p>本章算的例子有个特点：Q、K、V 全部来自<mark>同一个句子</mark>——"我 爱 猫"的词互相看彼此。这叫<mark>自注意力（Self-Attention）</mark>，是编码器和 GPT 式解码器里的主力。</p>
+  <p>但注意力机制本身并不要求三方同源。在机器翻译的解码器里（详见<a href="#ch06" class="xref">第 6 章</a>），会出现另一种用法：Query 来自正在生成的译文（比如已经生成的 "I love"），Key 和 Value 来自编码器处理完的原文（"我 爱 猫"）。直觉上就是：译文每生成一个词，都拿着自己的问题去<mark>查原文这座"图书馆"</mark>，决定该参考原文的哪几个词。这叫<mark>交叉注意力（Cross-Attention）</mark>——Q 和 K/V 来自两个不同的序列。计算流程一模一样，仍然是 <code class="math">softmax(QKᵀ/√d_k)V</code>，只是 Q 的行数和 K/V 的行数可以不同（输出长度跟随 Q）。</p>
+  <p>另外还有一个重要变体：生成式模型（GPT 类）做自注意力时，不允许词"偷看"后面的词，需要给注意力矩阵的右上角打上 <code class="math">−∞</code> 的掩码再 softmax。这就是因果掩码，留到<a href="#ch06" class="xref">第 6 章</a>详解。</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>类型</th><th>Q 来自</th><th>K、V 来自</th><th>典型用途</th></tr></thead>
+      <tbody>
+        <tr><td>自注意力（Self-Attention）</td><td>句子自己</td><td>句子自己</td><td>理解一句话内部的关系（本章）</td></tr>
+        <tr><td>掩码自注意力（Masked）</td><td>句子自己</td><td>句子自己，但只能看左边</td><td>GPT 式逐词生成（第 6、8 章）</td></tr>
+        <tr><td>交叉注意力（Cross-Attention）</td><td>译文（解码器）</td><td>原文（编码器的输出）</td><td>翻译时对齐原文（第 6 章）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>三者的计算公式完全一样，变的只是 Q、K、V 的来源和可见范围。<mark>学会一个，就学会了全部</mark>。</p>
+
+  <h3><span class="sec-no">3.10</span> 动手玩一玩：注意力演示</h3>
+  <p>下面这个演示把本章的公式跑在了真实小向量上：每个词有一个 6 维向量，改句子、换词语，热力图会实时重算；点击任意一行，还能逐帧观看"这个词的 Query 逐个和所有 Key 比对 → softmax → 加权求和"的完整动画，正是 3.5 节手算步骤的动态版。</p>
+  <div class="demo-frame" data-demo="demo-attention">正在加载交互演示…</div>
+  <div class="callout callout-tip">
+    <p class="callout-title">建议的玩法顺序</p>
+    <ol>
+      <li>先选例句「我非常爱这只猫」，点击「猫」那一行，按「下一步 ›」逐帧看完它如何分配注意力；</li>
+      <li>把「这只」换成「在」，观察「猫」那一行的热力图怎么变——词的向量换了，匹配关系全变；</li>
+      <li>用「自动播放」完整看一遍某一行，对照 3.5 节的四步表格，确认动画每一步你都能说出公式里的对应位置；</li>
+      <li>换例句「老师说数学其实很有趣」，找找看「有趣」把注意力分给了谁。</li>
+    </ol>
+  </div>
+
+  <h3><span class="sec-no">3.11</span> 一次注意力的计算量有多大？</h3>
+  <p>结束本章前，感受一下规模。<code class="math"><b>Q</b><b>K</b><sup>ᵀ</sup></code> 是 <code class="math">[n×d_k] × [d_k×n]</code>，大约 <code class="math">n²·d_k</code> 次乘加；<code class="math"><b>A</b><b>V</b></code> 同样是 <code class="math">n²·d_v</code> 量级。注意力主体的计算量随句子长度 <strong>n 平方增长</strong>：</p>
+  <div class="cols-2">
+    <div class="big-number"><div class="bn-v">n²</div><div class="bn-k">权重矩阵的格子数：句子 2 倍长，格子 4 倍多</div></div>
+    <div class="big-number"><div class="bn-v">2 次</div><div class="bn-k">大矩阵乘法：QKᵀ 与 A·V，GPU 的最爱</div></div>
+  </div>
+  <p>n = 100 时格子有 1 万个，毫无压力；n = 100 万（百万词上下文）时格子有 1 万亿个，光存这张权重表就要 TB 级内存。这就是为什么长上下文是 Transformer 的"阿喀琉斯之踵"，也是 FlashAttention、稀疏注意力等现代技术（<a href="#ch09" class="xref">第 9 章</a>）要解决的问题。但在本书的绝大部分例子里，n 都很小——理解机制本身，3 个词就够了。</p>
+
+  <h3><span class="sec-no">3.12</span> 本章小结</h3>
+  <ul>
+    <li><strong>注意力 = 可微分的软查询</strong>：Query 是问题，Key 是标签，Value 是内容；按问题与标签的匹配度（点积）分配比例，混合内容。</li>
+    <li><strong>Q、K、V 同源</strong>：都来自输入矩阵 X，各乘一个可学习权重矩阵，相当于每个词戴上三顶帽子扮演三种角色。</li>
+    <li><strong>四步流程</strong>：QKᵀ 算分数 → 除以 √d_k 缩放 → 逐行 softmax 得权重矩阵 A（每行和为 1）→ A·V 加权混合输出。</li>
+    <li><strong>√d_k 的作用</strong>：d_k 维随机向量的点积方差是 d_k，不缩放会让 softmax 饱和、梯度消失，模型无法训练。</li>
+    <li><strong>热力图读法</strong>：行是提问者、列是被看者，每行和为 1。</li>
+    <li><strong>自注意力 vs 交叉注意力</strong>：同源是自注意力；Q 与 K/V 来自不同序列是交叉注意力（翻译解码器用）。</li>
+    <li>3.5 节的「我 爱 猫」手算例子是本讲的"标准曲"，建议不看答案能独立复算。</li>
+  </ul>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">常见误区</p>
+    <ul>
+      <li><strong>误区 1："注意力就是选最重要的那个词。"</strong>错。注意力是软性的加权混合，不是取最大值。softmax 输出的是比例，输出向量为所有词 Value 的加权和，哪怕权重只有 0.05 的词也贡献了一份内容。</li>
+      <li><strong>误区 2："Q、K、V 是三份不同的输入数据。"</strong>错。它们是同一个输入 X 乘三个不同权重矩阵得到的三种投影。数据只有一份，角色有三种。</li>
+      <li><strong>误区 3："softmax 对整个矩阵一起做。"</strong>错。softmax 是<strong>逐行</strong>独立的：每个 Query 各自分配自己那 100% 的注意力预算。列方向不要求和为 1。</li>
+      <li><strong>误区 4："权重最大的格子就是'答案'。"</strong>权重只是"参考比例"，不是分类结果。而且一个注意力头只看一种"相关"，多种关系（指代、语序、搭配）要靠下一章的多头机制分工捕捉。</li>
+      <li><strong>误区 5："√d_k 是经验拍出来的常数。"</strong>它有明确的方差论证支撑（3.6 节），换成别的维度就要换别的缩放因子。</li>
+    </ul>
+  </div>
+
+  <details class="quiz">
+    <summary>自测 1：若 d_k 从 64 变成 256，缩放因子 √d_k 怎么变？不调整会发生什么？</summary>
+    <div class="quiz-body">
+      <p>√64 = 8，√256 = 16，缩放因子翻倍。如果维度变成 256 却仍除以 8，点积分数的典型幅度会比预期大一倍，softmax 输入偏大，输出权重更尖锐（更接近赢家通吃），梯度变小，训练会变慢甚至不稳定。缩放因子必须跟随 d_k 一起更新。</p>
+    </div>
+  </details>
+  <details class="quiz">
+    <summary>自测 2：在 3.5 节的例子里，"爱"那一行的原始分数是 (0, 1, 0.5)。如果不对第 2 步做缩放（即不除以 √2），softmax 后的三个权重大约会怎么变？</summary>
+    <div class="quiz-body">
+      <p>不缩放时 softmax 的输入是 (0, 1, 0.5)：e⁰=1、e¹≈2.718、e⁰·⁵≈1.649，和≈5.367，权重≈(0.186, 0.506, 0.307)。缩放后是 (0.2246, 0.4555, 0.3199)。可见不缩放会让权重更"尖锐"——最大者份额更大（0.506 vs 0.4555），最小者份额更小（0.186 vs 0.2246）。维度再高几个数量级，就会尖锐到 (1, 0, 0)，进入饱和区。</p>
+    </div>
+  </details>
+  <details class="quiz">
+    <summary>自测 3：注意力权重矩阵 A 的形状由什么决定？如果句子从 3 个词变成 10 个词，A 和输出 O 的形状各是多少（设 d_v = 2）？</summary>
+    <div class="quiz-body">
+      <p>A = softmax(QKᵀ)，Q 和 K 都是 [n × d_k]，所以 A 是 [n × n]——边长等于词数。10 个词时 A 是 [10 × 10]；O = A·V，V 是 [10 × 2]，所以 O 是 [10 × 2]。这也解释了注意力随句子长度的开销：权重矩阵有 n² 个格子，句子翻倍，格子数变 4 倍——这是长文本处理的核心瓶颈之一（第 9 章会讲现代对策）。</p>
+    </div>
+  </details>
+  <details class="quiz">
+    <summary>自测 4：3.5 节中"我"的输出是 (0.7141, 0.5928)，它约等于哪三个向量的什么组合？为什么输出一定落在"由 V 的行向量围成的凸包"里？</summary>
+    <div class="quiz-body">
+      <p>输出 = 0.4072×(1,0) + 0.2859×(0,1) + 0.3069×(1,1)，即三个 V 行向量的加权平均。因为权重非负且和为 1，输出是 V 各行的凸组合——几何上必然落在三个点围成的三角形内部（含边界）。这说明注意力本身"不会创造新内容"，它只是混合已有内容；真正产生新特征的工作交给后面的前馈网络（第 5 章）。</p>
+    </div>
+  </details>
+</section>

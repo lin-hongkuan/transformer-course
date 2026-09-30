@@ -1,0 +1,633 @@
+<section class="chapter" id="ch09">
+  <header class="ch-head">
+    <p class="ch-eyebrow">第 9 章 · 现代变体与应用（结章）</p>
+    <h2>从 2017 到今天：Transformer 家族全景</h2>
+    <p class="ch-lede">前面八章我们把 2017 年那台「原始 Transformer」拆成了零件又装了回去。这一章我们站远一点看全景：Transformer 已经分化成三大家族（BERT、GPT、T5），规模从几千万参数涨到几千亿，内部零件也悄悄换了一轮。学完本章，你会拿到一张「现代大语言模型地图」和一份继续深造的路线图。</p>
+  </header>
+
+  <h3><span class="sec-no">9.1</span> 同一台机器，三种用法</h3>
+
+  <p>回忆一下 <a href="#ch06" class="xref">第 6 章</a>：原始 Transformer 是一台「编码器 + 解码器」的机器，为机器翻译而生。编码器负责「读懂」输入句子，解码器负责「写出」输出句子。</p>
+
+  <p>但研究者们很快发现：<mark>不是每个任务都需要完整的两半</mark>。就像一台「榨汁机 + 搅拌机」二合一厨房机器，有人只想要榨汁功能，有人只想要搅拌功能。于是 Transformer 家族分化成了三支：</p>
+
+  <ul>
+    <li><strong>只要编码器</strong>（编码器-only）：代表是 <strong>BERT</strong>（2018，Google）。擅长「理解」：判断一句话的情感、给文本分类、抽取答案。</li>
+    <li><strong>只要解码器</strong>（解码器-only）：代表是 <strong>GPT</strong> 系列（2018 起，OpenAI）。擅长「生成」：写文章、写代码、聊天。</li>
+    <li><strong>编码器 + 解码器都保留</strong>：代表是 <strong>T5</strong>（2019，Google）和原始 Transformer 本身。擅长「转换」：翻译、摘要，把一种文本变成另一种文本。</li>
+  </ul>
+
+  <p>三者的区别，归根结底是<mark>一个词在注意力里「能看见谁」</mark>——也就是我们在 <a href="#ch06" class="xref">第 6 章</a>讲过的掩码（mask）怎么用。下面我们一族一族看。</p>
+
+  <h3><span class="sec-no">9.2</span> 编码器-only：BERT 与「理解」任务</h3>
+
+  <h4>9.2.1 双向看：每个词都能看见所有词</h4>
+
+  <p>BERT 只保留了编码器。它的注意力是<strong>完全双向</strong>的：句子里的每个词，在计算注意力时都能看见所有其他词——左边的、右边的、它自己，一个不落。没有任何因果掩码。</p>
+
+  <p>为什么可以这么「光明正大」地互相看？因为 BERT 的任务不是「预测下一个词」，不存在「偷看答案」的问题。它的目标是<mark>理解一个已经完整给定的句子</mark>，就像做阅读理解：文章整篇摆在你面前，你当然可以前后翻着看。</p>
+
+  <h4>9.2.2 预训练目标：掩码语言模型（MLM）</h4>
+
+  <p>BERT 用了一个非常巧妙的训练游戏，叫<strong>掩码语言模型（Masked Language Model, MLM）</strong>——说白了就是<mark>完形填空</mark>：</p>
+
+  <ol>
+    <li>拿一句正常的话：「小明 今天 去 学校 上学」。</li>
+    <li>随机挑一些词（原论文挑约 15%），用特殊符号 <code>[MASK]</code> 盖住：「小明 今天 <code>[MASK]</code> 学校 上学」。</li>
+    <li>让模型根据上下文猜被盖住的词是什么。这里答案应该是「去」。</li>
+    <li>猜错了就计算损失、反向传播、更新参数。</li>
+  </ol>
+
+  <p>这个游戏逼着模型学会真正的<mark>双向理解</mark>：要猜出 <code>[MASK]</code> 是「去」，模型必须同时利用左边的「小明 今天」和右边的「学校 上学」。只看一边信息是不够的。经过海量句子的完形填空训练，BERT 学会了深层的语言规律。</p>
+
+  <p>把一次预测摊开看长什么样。假设词表里就 6 个候选词（真实 BERT 词表是 30522 个），模型对「小明 今天 [MASK] 学校 上学」中 <code>[MASK]</code> 位置的输出经过 softmax 后可能是：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>候选词</th><th>去</th><th>回</th><th>在</th><th>吃</th><th>飞</th><th>蓝</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>预测概率</td><td><strong>0.62</strong></td><td>0.18</td><td>0.09</td><td>0.06</td><td>0.03</td><td>0.02</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>正确答案「去」拿到 0.62 的概率。损失就是 <code>−ln(0.62) ≈ 0.48</code>（交叉熵，<a href="#ch07" class="xref">第 7 章</a>）。模型每猜一次就微调一次参数，几亿道题刷下来，概率分布就会越来越「懂语言」：「飞」和「蓝」这种词在这个位置的概率被压得极低，靠的不是规则，而是从数据里统计 + 推理出来的语感。</p>
+
+  <h4>9.2.3 BERT 干什么用？</h4>
+
+  <p>BERT 本身只做「理解」，输出的是每个词的向量表示。要用它干活，通常在这些向量上面接一个很小的「分类头」（一两个线性层），再在任务数据上微调（fine-tune）：</p>
+
+  <ul>
+    <li><strong>文本分类</strong>：这封邮件是不是垃圾邮件？这条评论是好评还是差评？</li>
+    <li><strong>命名实体识别（NER）</strong>：从句子里找出人名、地名、公司名。</li>
+    <li><strong>问答抽取</strong>：给一段文章和一个问题，从文章里把答案原文框出来。</li>
+  </ul>
+
+  <p>规模数字：BERT base 是 <strong>12 层、隐藏维度 768、12 个注意力头、约 1.1 亿（110M）参数</strong>；BERT large 是 24 层、1024 维、约 3.4 亿参数。注意 BERT 把 d_model 从 2017 原版的 512 提到了 768。</p>
+
+  <h3><span class="sec-no">9.3</span> 解码器-only：GPT 与「生成」任务</h3>
+
+  <h4>9.3.1 单向看：每个词只能看左边的词</h4>
+
+  <p>GPT 只保留了解码器那一半（去掉了交叉注意力，只留掩码自注意力 + 前馈网络）。它的注意力是<strong>单向</strong>的：每个词只能看见它<strong>左边</strong>的词（和自己），绝不能看右边。这正是 <a href="#ch06" class="xref">第 6 章</a>讲过的<strong>因果掩码（causal mask）</strong>——注意力矩阵的上三角被填成 <code>-inf</code>，softmax 之后变成 0。</p>
+
+  <p>为什么这么「自缚手脚」？因为 GPT 的训练目标是<mark>预测下一个词</mark>：给「今天 天气」，猜下一个词是「很」。如果允许它看右边，那它直接抄答案就行了，什么也学不到。因果掩码保证了「预测未来时只能依据过去」，这也让模型天然具备从左到右逐词生成的能力。</p>
+
+  <h4>9.3.2 预训练目标：下一词预测</h4>
+
+  <p>GPT 的预训练目标用一句话就能说清：<mark>给定前面所有词，预测下一个词</mark>。就这么简单。但关键在于——这个目标可以无限地从原始文本里「自动出题」：任何一段文字，把最后一个词遮住就是一道题。互联网上数万亿词的文本，就是数万亿道免费练习题。不需要任何人工标注。</p>
+
+  <p>这个看似朴素的目标，被证明是通往通用智能的一条路：要想把「下一个词」猜得足够准，模型必须学会语法、事实、推理、甚至一点点常识。就像要把一部小说的下一句续得天衣无缝，你得先读懂前面所有的情节。</p>
+
+  <h4>9.3.2.1 手算一步：预测下一个词时的注意力</h4>
+
+  <p>我们用 <a href="#ch03" class="xref">第 3 章</a>的 3 词小例子复习一次，这次加上因果掩码。假设三个词「今天 / 天气 / 很」的 Q·K 打分矩阵（未缩放、未 softmax）是：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>Q \ K</th><th>今天</th><th>天气</th><th>很</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>今天</td><td>2.0</td><td><s>1.0</s></td><td><s>0.5</s></td></tr>
+        <tr><td>天气</td><td>0.8</td><td>1.5</td><td><s>0.9</s></td></tr>
+        <tr><td>很</td><td>0.3</td><td>1.2</td><td>2.2</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>带删除线的格子是因果掩码盖掉的：「今天」不许看「天气」「很」，「天气」不许看「很」——它们在上三角，被填成 <code>-inf</code>，softmax 后概率为 0。看「很」这一行（它要负责预测下一个词）：softmax(0.3, 1.2, 2.2)：</p>
+
+  <ul>
+    <li>e<sup>0.3</sup> ≈ 1.35，e<sup>1.2</sup> ≈ 3.32，e<sup>2.2</sup> ≈ 9.03，合计 ≈ 13.70。</li>
+    <li>「很」对「今天」的注意力 ≈ 1.35 / 13.70 ≈ <strong>0.10</strong>，对「天气」≈ 3.32 / 13.70 ≈ <strong>0.24</strong>，对自己 ≈ 9.03 / 13.70 ≈ <strong>0.66</strong>。</li>
+  </ul>
+
+  <p>最终「很」位置的新向量 ≈ 0.10 × V<sub>今天</sub> + 0.24 × V<sub>天气</sub> + 0.66 × V<sub>很</sub>——它综合了左边全部历史，然后拿去向词表打分，猜下一个词。整个 GPT 训练就是把这个动作重复几千亿次。</p>
+
+  <h4>9.3.3 GPT 干什么用？</h4>
+
+  <p>解码器-only 架构是今天所有主流大语言模型的形态：GPT 系列、LLaMA 系列、Claude、Gemini……聊天、写作、编程助手、翻译、摘要——全都是「给定上文、生成下文」这一动作的变体。<a href="#ch08" class="xref">第 8 章</a>讲的自回归生成、采样策略、KV Cache，都是为这一族量身定做的推理技术。</p>
+
+  <h3><span class="sec-no">9.4</span> 编码器-解码器：T5 与「转换」任务</h3>
+
+  <p>第三支保留了完整的「编码器 + 解码器」结构，也就是 <a href="#ch06" class="xref">第 6 章</a>里我们完整走查过的那台机器：编码器双向读入整个输入，解码器单向生成输出，两者之间靠<strong>交叉注意力</strong>连接（解码器的 Q 去查编码器输出的 K、V）。</p>
+
+  <p>这一支的代表作 <strong>T5</strong>（Text-to-Text Transfer Transformer，2019，Google）提出了一个极有影响力的思想：<mark>把一切 NLP 任务都统一成「文本到文本」</mark>。翻译是「英文文本 → 中文文本」，摘要是「长文本 → 短文本」，分类也可以变成「输入评论文本 → 输出单词『好评』或『差评』」，甚至连计算题都能变成「输入『3+5=？』→ 输出『8』」。所有任务共用同一台编码器-解码器机器，只是输入输出的文本格式不同。这个「大一统」视角直接影响了后来指令微调（instruction tuning）时代的提示词范式。</p>
+
+  <p>今天，编码器-解码器结构在纯 LLM 领域让位于解码器-only（因为后者更简单、更易于规模化），但在翻译、摘要等「输入输出界限分明」的场景，以及不少多模态模型里，它依然是主力。</p>
+
+  <h4>9.4.1 T5 的「大一统」到底长什么样？</h4>
+
+  <p>为了让「一切任务皆文本到文本」不只是一句口号，T5 在输入文本前加一个<strong>任务前缀</strong>，告诉机器这次要干什么：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>任务</th><th>输入（送进编码器）</th><th>期望输出（解码器生成）</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>翻译</td><td>translate English to Chinese: I love you</td><td>我爱你</td></tr>
+        <tr><td>摘要</td><td>summarize: （一篇长新闻）</td><td>（三句话的摘要）</td></tr>
+        <tr><td>分类</td><td>sentiment: 这家餐厅太难吃了</td><td>negative</td></tr>
+        <tr><td>语法判断</td><td>cola sentence: He go to school</td><td>not_acceptable</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>注意每一行的输入输出都是纯文本——连「分类」的输出都不是一个类别编号，而是单词「negative」。这样做的好处是：所有任务可以混在同一个训练集里，用同一个模型、同一个损失函数（还是交叉熵预测下一个词）训练。任务之间的知识还能互相迁移：学会摘要的模型，做分类也更好。这个思路今天演化为「指令微调」——你在聊天框里打的每一句「请帮我……」，本质上就是一个任务前缀。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 760 430" role="img" aria-label="Transformer 三大谱系架构对比图">
+      <defs>
+        <marker id="arr-09a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"></path>
+        </marker>
+        <marker id="arr-09b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"></path>
+        </marker>
+      </defs>
+
+      <text x="20" y="28" font-size="16" font-weight="bold" fill="var(--ink)" font-family="inherit">Transformer 三大谱系：看「谁遮住了谁」</text>
+
+      <!-- BERT panel -->
+      <text x="30" y="62" font-size="14" font-weight="bold" fill="var(--accent)" font-family="inherit">① 编码器-only：BERT</text>
+      <text x="30" y="80" font-size="11" fill="var(--muted)" font-family="inherit">双向注意力 · 全连线，无掩码</text>
+
+      <rect x="30" y="180" width="200" height="120" rx="10" fill="var(--paper2)" stroke="var(--accent)" stroke-width="2"></rect>
+      <text x="130" y="200" text-anchor="middle" font-size="12" font-weight="bold" fill="var(--ink)" font-family="inherit">编码器 × N</text>
+      <text x="130" y="218" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="inherit">（双向自注意力 + FFN）</text>
+
+      <g stroke="var(--accent)" stroke-width="1.4" opacity="0.75">
+        <line x1="60" y1="255" x2="95" y2="230"></line>
+        <line x1="60" y1="255" x2="130" y2="230"></line>
+        <line x1="60" y1="255" x2="165" y2="230"></line>
+        <line x1="60" y1="255" x2="200" y2="230"></line>
+        <line x1="95" y1="255" x2="60" y2="230"></line>
+        <line x1="95" y1="255" x2="130" y2="230"></line>
+        <line x1="95" y1="255" x2="165" y2="230"></line>
+        <line x1="95" y1="255" x2="200" y2="230"></line>
+        <line x1="130" y1="255" x2="60" y2="230"></line>
+        <line x1="130" y1="255" x2="95" y2="230"></line>
+        <line x1="130" y1="255" x2="165" y2="230"></line>
+        <line x1="130" y1="255" x2="200" y2="230"></line>
+        <line x1="165" y1="255" x2="60" y2="230"></line>
+        <line x1="165" y1="255" x2="95" y2="230"></line>
+        <line x1="165" y1="255" x2="130" y2="230"></line>
+        <line x1="165" y1="255" x2="200" y2="230"></line>
+        <line x1="200" y1="255" x2="60" y2="230"></line>
+        <line x1="200" y1="255" x2="95" y2="230"></line>
+        <line x1="200" y1="255" x2="130" y2="230"></line>
+        <line x1="200" y1="255" x2="165" y2="230"></line>
+      </g>
+      <g font-size="10" fill="var(--ink)" font-family="inherit">
+        <rect x="45" y="260" width="30" height="20" rx="4" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="60" y="274" text-anchor="middle">词1</text>
+        <rect x="80" y="260" width="30" height="20" rx="4" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="95" y="274" text-anchor="middle">词2</text>
+        <rect x="115" y="260" width="30" height="20" rx="4" fill="var(--accent)" stroke="var(--accent)"></rect>
+        <text x="130" y="274" text-anchor="middle" fill="var(--paper2)">M</text>
+        <rect x="150" y="260" width="30" height="20" rx="4" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="165" y="274" text-anchor="middle">词4</text>
+        <rect x="185" y="260" width="30" height="20" rx="4" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="200" y="274" text-anchor="middle">词5</text>
+      </g>
+
+      <line x1="130" y1="330" x2="130" y2="306" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-09a)"></line>
+      <text x="130" y="344" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="inherit">输入：整句（含 [MASK]）</text>
+      <line x1="130" y1="180" x2="130" y2="150" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-09a)"></line>
+      <text x="130" y="142" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="inherit">输出：每个词的理解向量 → 分类/猜词</text>
+
+      <!-- GPT panel -->
+      <text x="280" y="62" font-size="14" font-weight="bold" fill="var(--accent2)" font-family="inherit">② 解码器-only：GPT</text>
+      <text x="280" y="80" font-size="11" fill="var(--muted)" font-family="inherit">因果掩码 · 连线只向左看</text>
+
+      <rect x="280" y="180" width="200" height="120" rx="10" fill="var(--paper2)" stroke="var(--accent2)" stroke-width="2"></rect>
+      <text x="380" y="200" text-anchor="middle" font-size="12" font-weight="bold" fill="var(--ink)" font-family="inherit">解码器 × N</text>
+      <text x="380" y="218" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="inherit">（掩码自注意力 + FFN）</text>
+
+      <g stroke="var(--accent2)" stroke-width="1.4" opacity="0.75">
+        <line x1="345" y1="255" x2="310" y2="230"></line>
+        <line x1="380" y1="255" x2="310" y2="230"></line>
+        <line x1="380" y1="255" x2="345" y2="230"></line>
+        <line x1="415" y1="255" x2="310" y2="230"></line>
+        <line x1="415" y1="255" x2="345" y2="230"></line>
+        <line x1="415" y1="255" x2="380" y2="230"></line>
+        <line x1="450" y1="255" x2="310" y2="230"></line>
+        <line x1="450" y1="255" x2="345" y2="230"></line>
+        <line x1="450" y1="255" x2="380" y2="230"></line>
+        <line x1="450" y1="255" x2="415" y2="230"></line>
+      </g>
+      <g font-size="10" fill="var(--ink)" font-family="inherit">
+        <rect x="295" y="260" width="30" height="20" rx="4" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="310" y="274" text-anchor="middle">词1</text>
+        <rect x="330" y="260" width="30" height="20" rx="4" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="345" y="274" text-anchor="middle">词2</text>
+        <rect x="365" y="260" width="30" height="20" rx="4" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="380" y="274" text-anchor="middle">词3</text>
+        <rect x="400" y="260" width="30" height="20" rx="4" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="415" y="274" text-anchor="middle">词4</text>
+        <rect x="435" y="260" width="30" height="20" rx="4" fill="var(--accent2)" stroke="var(--accent2)"></rect>
+        <text x="450" y="274" text-anchor="middle" fill="var(--paper2)">?</text>
+      </g>
+      <text x="380" y="296" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="inherit">词4 看不见词5；末尾位置的预测能看全部左边</text>
+
+      <line x1="380" y1="330" x2="380" y2="306" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-09a)"></line>
+      <text x="380" y="344" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="inherit">输入：上文逐词送入</text>
+      <line x1="380" y1="180" x2="380" y2="150" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-09a)"></line>
+      <text x="380" y="142" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="inherit">输出：下一个词（再拼回输入，循环生成）</text>
+
+      <!-- T5 panel -->
+      <text x="530" y="62" font-size="14" font-weight="bold" fill="var(--accent3)" font-family="inherit">③ 编码器-解码器：T5</text>
+      <text x="530" y="80" font-size="11" fill="var(--muted)" font-family="inherit">编码器双向读全文，解码器单向生成</text>
+
+      <rect x="530" y="180" width="95" height="120" rx="10" fill="var(--paper2)" stroke="var(--accent3)" stroke-width="2"></rect>
+      <text x="577" y="200" text-anchor="middle" font-size="11" font-weight="bold" fill="var(--ink)" font-family="inherit">编码器</text>
+      <text x="577" y="215" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="inherit">双向注意力</text>
+      <g font-size="9" fill="var(--ink)" font-family="inherit">
+        <rect x="540" y="260" width="22" height="16" rx="3" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="551" y="271" text-anchor="middle">源1</text>
+        <rect x="566" y="260" width="22" height="16" rx="3" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="577" y="271" text-anchor="middle">源2</text>
+        <rect x="592" y="260" width="22" height="16" rx="3" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="603" y="271" text-anchor="middle">源3</text>
+      </g>
+      <g stroke="var(--accent3)" stroke-width="1.2" opacity="0.7">
+        <line x1="551" y1="256" x2="577" y2="236"></line>
+        <line x1="551" y1="256" x2="603" y2="236"></line>
+        <line x1="577" y1="256" x2="551" y2="236"></line>
+        <line x1="577" y1="256" x2="603" y2="236"></line>
+        <line x1="603" y1="256" x2="551" y2="236"></line>
+        <line x1="603" y1="256" x2="577" y2="236"></line>
+      </g>
+
+      <rect x="640" y="180" width="95" height="120" rx="10" fill="var(--paper2)" stroke="var(--accent3)" stroke-width="2"></rect>
+      <text x="687" y="200" text-anchor="middle" font-size="11" font-weight="bold" fill="var(--ink)" font-family="inherit">解码器</text>
+      <text x="687" y="215" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="inherit">因果掩码</text>
+      <g font-size="9" fill="var(--ink)" font-family="inherit">
+        <rect x="650" y="260" width="22" height="16" rx="3" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="661" y="271" text-anchor="middle">目1</text>
+        <rect x="676" y="260" width="22" height="16" rx="3" fill="var(--paper2)" stroke="var(--line)"></rect>
+        <text x="687" y="271" text-anchor="middle">目2</text>
+        <rect x="702" y="260" width="22" height="16" rx="4" fill="var(--accent3)" stroke="var(--accent3)"></rect>
+        <text x="713" y="271" text-anchor="middle" fill="var(--paper2)">?</text>
+      </g>
+      <g stroke="var(--accent3)" stroke-width="1.2" opacity="0.7">
+        <line x1="687" y1="256" x2="661" y2="236"></line>
+        <line x1="713" y1="256" x2="661" y2="236"></line>
+        <line x1="713" y1="256" x2="687" y2="236"></line>
+      </g>
+
+      <line x1="625" y1="228" x2="640" y2="228" stroke="var(--accent)" stroke-width="2" marker-end="url(#arr-09b)"></line>
+      <text x="632" y="218" text-anchor="middle" font-size="8" fill="var(--accent)" font-family="inherit">交叉</text>
+      <text x="632" y="248" text-anchor="middle" font-size="8" fill="var(--accent)" font-family="inherit">注意力</text>
+
+      <line x1="577" y1="330" x2="577" y2="306" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-09a)"></line>
+      <text x="577" y="344" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="inherit">输入：源文本</text>
+      <line x1="687" y1="180" x2="687" y2="150" stroke="var(--muted)" stroke-width="2" marker-end="url(#arr-09a)"></line>
+      <text x="687" y="142" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="inherit">输出：目标文本逐词生成</text>
+
+      <rect x="30" y="370" width="700" height="44" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="50" y="396" font-size="11" fill="var(--muted)" font-family="inherit">一句话记住：BERT「左右都看见」用来理解；GPT「只看左边」用来生成；T5「左边编码器看全文，右边解码器写答案」用来转换。</text>
+    </svg>
+    <figcaption>图 9-1　三大谱系架构对比。连线表示「谁在注意力里能看见谁」：BERT 全连接（双向），GPT 只向左（因果掩码），T5 编码器内部双向、解码器内部向左、中间靠交叉注意力连接。</figcaption>
+  </div>
+
+  <div class="callout callout-tip">
+    <p class="callout-title">一个实用的判断口诀</p>
+    <p>看到一个 Transformer 模型，先问：<strong>它的注意力掩码长什么样？</strong>全都能看 → 理解型（编码器-only）；只能看左 → 生成型（解码器-only）；分两段、两段规则不同 → 转换型（编码器-解码器）。掩码形状基本决定了模型能干什么。</p>
+  </div>
+
+  <p>下面这个交互演示把三族并排放在你面前：点按钮切换，观察注意力连线怎么变化、信息怎么流动。</p>
+
+  <div class="demo-frame" data-demo="demo-family">正在加载交互演示…</div>
+
+  <h3><span class="sec-no">9.5</span> 规模定律：大力真的出奇迹？</h3>
+
+  <h4>9.5.1 从 65M 到 175B：五年涨了三个数量级</h4>
+
+  <p>先看一组真实数字，感受 Transformer 家族的「膨胀速度」：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>模型</th><th>年份</th><th>参数量</th><th>架构</th><th>备注</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Transformer base（原论文）</td><td>2017</td><td>65M</td><td>编码器-解码器</td><td>6+6 层，d_model=512</td></tr>
+        <tr><td>Transformer big（原论文）</td><td>2017</td><td>213M</td><td>编码器-解码器</td><td>d_model=1024，d_ff=4096</td></tr>
+        <tr><td>BERT base</td><td>2018</td><td>110M</td><td>编码器-only</td><td>12 层，768 维，12 头</td></tr>
+        <tr><td>BERT large</td><td>2018</td><td>340M</td><td>编码器-only</td><td>24 层，1024 维</td></tr>
+        <tr><td>GPT-2</td><td>2019</td><td>1.5B</td><td>解码器-only</td><td>48 层，1600 维</td></tr>
+        <tr><td>T5-11B</td><td>2019</td><td>11B</td><td>编码器-解码器</td><td>当时最大的文本到文本模型</td></tr>
+        <tr><td>GPT-3</td><td>2020</td><td><strong>175B</strong></td><td>解码器-only</td><td><strong>96 层，12288 维，96 头</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>从 2017 年的 65M 到 2020 年 GPT-3 的 175B（1750 亿），参数量涨了约 <strong>2700 倍</strong>。拿 GPT-3 感受一下体量：96 层解码器叠起来，每层隐藏维度 12288——是原论文 512 的 24 倍。训练它需要几千张顶级 GPU 跑上几个月，成本是「百万美元级」的（量级估算）。</p>
+
+  <div class="callout callout-info">
+    <p class="callout-title">GPT-3 的 175B 到底有多大？一个尺寸类比</p>
+    <p>1750 亿个参数，每个用 2 字节（FP16 半精度）存储，就要约 <strong>350 GB</strong>——塞不进任何单张消费级显卡（即使是顶级游戏显卡也只有 24 GB 显存），需要多张数据中心 GPU 分片存放才能装下模型本体。训练时还要额外保存梯度和优化器状态，实际占用是模型本体的数倍。相比之下，BERT base 的 110M 参数只占约 220 MB，一张普通显卡就能轻松跑起来。这就是「大模型」三个字背后的物理现实。</p>
+  </div>
+
+  <h4>9.5.2 规模定律：损失与规模的「对数线性」关系</h4>
+
+  <p>2020 年 OpenAI 的研究者（Kaplan et al.）发现了一个惊人规律的现象：把「模型参数量」「训练数据量」「训练算力」取对数画在横轴，把「测试损失」取对数画在纵轴，得到的几乎是<mark>一条笔直的下降直线</mark>。这就是著名的<strong>规模定律（Scaling Laws）</strong>。</p>
+
+  <p>「对数线性」是什么意思？用大白话讲：</p>
+
+  <div class="callout callout-info">
+    <p class="callout-title">对数线性 = 每扩大 10 倍，误差下降固定的一小格</p>
+    <p>普通线性关系是「投入加一份，产出加一份」。对数线性是「投入翻<strong>十倍</strong>，产出才加一份」。也就是说：参数量从 1 亿涨到 10 亿，损失下降一截；想再降同样一截，得从 10 亿涨到 100 亿。回报在递减，但<mark>不会停</mark>——只要继续扩大十倍，就还能再降一截。这给了工业界一个可以「按图施工」的配方：算清楚预算，就能预测损失能降到多少。</p>
+  </div>
+
+  <div class="fig">
+    <svg viewBox="0 0 760 340" role="img" aria-label="规模定律对数坐标示意图">
+      <defs>
+        <marker id="arr-09c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"></path>
+        </marker>
+      </defs>
+
+      <text x="30" y="28" font-size="15" font-weight="bold" fill="var(--ink)" font-family="inherit">规模定律直觉：对数坐标下的直线下降（示意，非真实数据）</text>
+
+      <!-- axes -->
+      <line x1="80" y1="50" x2="80" y2="280" stroke="var(--line)" stroke-width="2"></line>
+      <line x1="80" y1="280" x2="720" y2="280" stroke="var(--line)" stroke-width="2"></line>
+      <text x="40" y="55" font-size="11" fill="var(--muted)" font-family="inherit">高</text>
+      <text x="40" y="280" font-size="11" fill="var(--muted)" font-family="inherit">低</text>
+      <text x="30" y="170" font-size="12" fill="var(--ink)" font-family="inherit" transform="rotate(-90 30 170)">测试损失（对数）</text>
+
+      <!-- x ticks -->
+      <g font-size="11" fill="var(--muted)" font-family="inherit" text-anchor="middle">
+        <text x="140" y="300">1 亿参数</text>
+        <text x="270" y="300">10 亿</text>
+        <text x="400" y="300">100 亿</text>
+        <text x="530" y="300">1000 亿</text>
+        <text x="660" y="300">1 万亿</text>
+      </g>
+      <g stroke="var(--line)" stroke-width="1" stroke-dasharray="3 4">
+        <line x1="140" y1="60" x2="140" y2="280"></line>
+        <line x1="270" y1="60" x2="270" y2="280"></line>
+        <line x1="400" y1="60" x2="400" y2="280"></line>
+        <line x1="530" y1="60" x2="530" y2="280"></line>
+        <line x1="660" y1="60" x2="660" y2="280"></line>
+      </g>
+      <text x="400" y="326" text-anchor="middle" font-size="12" fill="var(--ink)" font-family="inherit">模型规模 / 数据量 / 算力（对数，每格 ×10）</text>
+
+      <!-- loss line -->
+      <path d="M110,88 C 200,120 320,168 430,205 S 630,262 700,272" fill="none" stroke="var(--accent)" stroke-width="3"></path>
+
+      <!-- points -->
+      <circle cx="140" cy="102" r="5" fill="var(--accent2)"></circle>
+      <text x="140" y="88" text-anchor="middle" font-size="10" fill="var(--accent2)" font-family="inherit">BERT</text>
+      <circle cx="300" cy="178" r="5" fill="var(--accent2)"></circle>
+      <text x="300" y="164" text-anchor="middle" font-size="10" fill="var(--accent2)" font-family="inherit">GPT-2</text>
+      <circle cx="520" cy="246" r="6" fill="var(--accent3)"></circle>
+      <text x="520" y="232" text-anchor="middle" font-size="10" fill="var(--accent3)" font-family="inherit">GPT-3 175B</text>
+
+      <!-- annotation -->
+      <line x1="210" y1="60" x2="210" y2="130" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"></line>
+      <text x="220" y="72" font-size="10" fill="var(--muted)" font-family="inherit">每扩大 10 倍规模，</text>
+      <text x="220" y="86" font-size="10" fill="var(--muted)" font-family="inherit">损失下降的幅度大致相同</text>
+
+      <text x="580" y="60" font-size="11" font-weight="bold" fill="var(--accent)" font-family="inherit">示意曲线，非真实数据</text>
+    </svg>
+    <figcaption>图 9-2　规模定律直觉图。横轴是规模（对数刻度），纵轴是损失（对数刻度），大致呈直线下降。<strong>注意：本图是帮助理解「对数线性」的示意图，点与曲线均非真实测量数据。</strong></figcaption>
+  </div>
+
+  <h4>9.5.3 涌现能力：规模到了，能力「突然」出现？</h4>
+
+  <p>伴随规模扩张，研究者观察到一个更神奇的现象：<strong>涌现能力（emergent abilities）</strong>。小模型完全做不了某些任务（比如三位数乘法、多步推理），随着规模增大，准确率长期在「瞎猜」水平徘徊，然后<mark>在某个规模阈值附近突然蹿升</mark>——就像水在 100°C 前只是水，到了沸点突然变成蒸汽。GPT-3 展现的「少样本学习」（只看几个例子就会做新任务）就是著名例子。</p>
+
+  <p>不过要说明：这个现象<strong>仍有争议</strong>。有研究者认为「涌现」部分是评测指标的假象（比如「全对才算对」的打分方式会把平滑的进步伪装成突变），而非模型内部真的发生了质变。这个争论至今没有定论，知道双方观点即可。</p>
+
+  <h4>9.5.4 钱烧对了方向吗？计算最优</h4>
+
+  <p>规模定律还有一个非常实用的推论：给定一笔固定的算力预算，「大模型 + 少量数据」和「小模型 + 海量数据」哪个更划算？2022 年 DeepMind 的 Chinchilla 研究给出的答案是：<mark>当时的大模型普遍「太大而读得太少」</mark>。参数量和训练数据量应该<strong>大致同步增长</strong>（经验法则：每个参数约配 20 个 token 的训练数据）。用同样多的算力，一个「身材适中但博览群书」的模型，能打败「块头巨大却只读了点皮毛」的模型。这个结论直接改写了之后所有主流 LLM 的训练配方——你会在很多技术报告里看到「20 tokens per parameter」这个数字。</p>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">别把规模定律当成「永动机」</p>
+    <p>对数线性下降意味着<strong>每降一格都贵十倍</strong>。损失从 3 降到 2 花一百万元，从 2 降到 1 可能就要花十亿元（量级估算）。规模定律描述的是「还能降」，不是「降得起」。这也是为什么现代研究越来越重视数据质量、训练效率和推理优化——光靠堆钱堆卡的时代，边际收益已经肉眼可见地变薄了。</p>
+  </div>
+
+  <h3><span class="sec-no">9.6</span> 现代改进速查表：2017 原版 → 现代 LLM</h3>
+
+  <p>今天的 LLaMA、Qwen、DeepSeek 等现代开源大模型，骨架还是 Transformer，但内部零件几乎全换了一轮。下表把「2017 原版 → 现代 LLM」的替换逐条列出：</p>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>部件</th><th>2017 原版</th><th>现代 LLM</th><th>为什么换</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>位置编码</strong></td>
+          <td>正弦位置编码（<a href="#ch02" class="xref">第 2 章</a>）</td>
+          <td><strong>RoPE</strong>（旋转位置编码）</td>
+          <td>RoPE 把「位置」编成向量空间的<strong>旋转角度</strong>：两个词的相对距离越远，它们向量的相对转角越大。这样模型天然感知的是「相对距离」而非「绝对编号」，外推到更长上下文时表现更稳。</td>
+        </tr>
+        <tr>
+          <td><strong>归一化</strong></td>
+          <td>LayerNorm，Post-LN（先加残差再归一化）</td>
+          <td><strong>RMSNorm + Pre-LN</strong></td>
+          <td>RMSNorm 去掉了 LayerNorm 的「减均值」步骤，只按均方根缩放，计算更省、效果几乎不掉；Pre-LN（在每个子层<strong>之前</strong>归一化，残差通道一路干净到底）让几十上百层的深网络训练更稳，不容易梯度爆炸（<a href="#ch05" class="xref">第 5 章</a>）。</td>
+        </tr>
+        <tr>
+          <td><strong>激活函数</strong></td>
+          <td>ReLU</td>
+          <td><strong>SwiGLU</strong></td>
+          <td>SwiGLU 是「带门控的激活」：把输入分成两路，一路过 Sigmoid 当「开关」，乘到另一路上。相当于让模型自己学会「每个维度开多大」，表达力更强，训练更顺。</td>
+        </tr>
+        <tr>
+          <td><strong>注意力</strong></td>
+          <td>MHA（多头注意力，8 头，每头独立 K、V）</td>
+          <td><strong>GQA / MQA</strong>（分组查询 / 多查询注意力）</td>
+          <td>让多个 Q 头<strong>共享</strong>同一组 K、V：GQA 把 Q 头分组共享，MQA 是所有头共享一份。推理时 KV Cache（<a href="#ch08" class="xref">第 8 章</a>）的显存占用直接缩小数倍到数十倍，长上下文生成快得多，质量损失却很小。</td>
+        </tr>
+        <tr>
+          <td><strong>上下文长度</strong></td>
+          <td>512 个词</td>
+          <td><strong>128K+ 词</strong>（常见 32K～1M）</td>
+          <td>RoPE 外推技巧、稀疏注意力、FlashAttention 显存优化共同把窗口撑大了几百倍——从「一段话」到「一整本书」。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>看这张表你可能会感慨「变化真大」。但请注意：<mark>这些全是「同一个注意力公式」的工程改良</mark>。Q·Kᵀ/√d_k 缩放、softmax、加权求和——核心算法一个符号都没变。变的只是让这套机制在千倍规模下跑得更稳、更快、更省。</p>
+
+  <h4>9.6.1 逐项再解释一层直觉</h4>
+
+  <p>上面表格的「为什么换」一栏比较浓缩，这里给零基础读者再把每一项的直觉展开一点：</p>
+
+  <ul>
+    <li><strong>RoPE 的「旋转」到底是什么？</strong>把每个词的高维向量两两一组，看成很多个二维小平面上的点。RoPE 做的事就是：位置每往后挪一格，就把这些点在每个小平面上转一个小角度。两个词算注意力时，转角的<strong>差</strong>正好等于它们的相对距离——所以模型读到的是「隔了几个词」，而不是「第几号位置」。相对距离对语言更重要（「主语后面隔三个词往往是谓语」这种规律与绝对位置无关），这就是 RoPE 更合理的根本原因。</li>
+    <li><strong>RMSNorm 为什么敢「减均值」都省了？</strong>LayerNorm 做两件事：把向量的均值拉到 0，再把方差拉到 1。RMSNorm 的观察是：第二件事（缩放）才是稳定训练的关键，第一件事贡献不大却要多算一遍均值。于是直接除以「均方根」（各维度平方平均再开根号）了事，又快又稳。</li>
+    <li><strong>Pre-LN 为什么更稳？</strong>Post-LN 的残差路径上隔着归一化层，几十层叠起来后，归一化放大的梯度容易失控；Pre-LN 让残差「高速公路」一路畅通无阻（<a href="#ch05" class="xref">第 5 章</a>的高速公路类比在这里完整兑现），深达上百层的网络也能稳稳训练。</li>
+    <li><strong>GQA 省显存省在哪？</strong>推理时每生成一个词，都要把历史所有词的 K、V 存在显存里（KV Cache）。MHA 下 96 层 × 96 头 × 每头 128 维的 K 和 V，长上下文时轻松吃掉几十 GB。GQA 让 8 个 Q 头共享一组 K、V，KV Cache 直接缩小 8 倍；MQA 更激进，全部头共享一份，缩小几十倍——质量只掉一点点，速度与显存收益巨大。</li>
+  </ul>
+
+  <p>把这张表和 <a href="#ch03" class="xref">第 3</a>～<a href="#ch05" class="xref">5 章</a>对照着读一遍，你会有一种「旧友重逢」的感觉：注意力还是那套 Q·Kᵀ 打分，前馈还是「先升维再降维」，残差还是那条高速公路。现代 LLM 的论文读起来吓人，拆开后全是老朋友换了新衣服。</p>
+
+  <h3><span class="sec-no">9.7</span> 上下文为什么贵？FlashAttention 的救场</h3>
+
+  <h4>9.7.1 注意力的 O(n²) 魔咒</h4>
+
+  <p>回忆 <a href="#ch03" class="xref">第 3 章</a>：注意力要计算一个 <code>n × n</code> 的分数矩阵（每个词对每个词打一次分）。序列长度 n 翻倍，矩阵变成 <strong>4 倍</strong>大——这就是 O(n²)，平方增长。</p>
+
+  <p>平方增长有多可怕？算一笔账：</p>
+
+  <ul>
+    <li>n = 512（原论文）：注意力矩阵 512 × 512 ≈ <strong>26 万</strong>个格子，小意思。</li>
+    <li>n = 4096：4096 × 4096 ≈ <strong>1670 万</strong>个格子，还行。</li>
+    <li>n = 128K（现代长上下文）：131072 × 131072 ≈ <strong>171 亿</strong>个格子——一个头一层的注意力矩阵就要吃掉几十 GB 显存，直接爆。</li>
+  </ul>
+
+  <p>这就是为什么「长上下文」贵：不只是算得慢，<mark>显存先扛不住</mark>。</p>
+
+  <h4>9.7.2 FlashAttention：不写下来，分块算</h4>
+
+  <p>这里还有一个容易被忽略的细节：注意力的瓶颈不只是「算多少次」，还有「往显存里写多少字节」。GPU 的计算核心极快，但显存（HBM）的读写相对慢得多。标准实现要先把 n×n 的分数矩阵整个写进显存、读回来做 softmax、再写回去、再读回来做加权求和——<mark>大部分时间在等数据搬运，而不是在计算</mark>。</p>
+
+  <p>2022 年的 <strong>FlashAttention</strong> 用一个漂亮的工程思想同时化解了显存和搬运两个危机，一句话版本：</p>
+
+  <div class="callout callout-tip">
+    <p class="callout-title">FlashAttention 的一句话思想</p>
+    <p><strong>不把 n×n 的注意力矩阵真的写出来，而是把矩阵切成小块，边算边丢，只保留最终结果。</strong>就像心算一长串加法：你不会把中间每一步的和都抄在纸上（那要写 n² 个数），而是只在脑子里维护一个「当前累计和」。分块计算 + 在线 softmax（online softmax）让显存占用从 O(n²) 降到 O(n)，同时利用 GPU 的高速缓存还快了好几倍。它不改变注意力的数学结果，只改变计算顺序——是今天所有大模型训练和推理的标配。</p>
+  </div>
+
+  <h3><span class="sec-no">9.8</span> 全书总结：一张图回顾数据流</h3>
+
+  <p>走到这里，让我们把全书八章的知识压缩成一张「一图流」。下面的图展示了一句话穿过完整 Transformer 的旅程——每个环节都标着它首次登场的章节号。</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 760 470" role="img" aria-label="Transformer 全书数据流回顾图">
+      <defs>
+        <marker id="arr-09d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--ink)"></path>
+        </marker>
+      </defs>
+
+      <text x="30" y="30" font-size="16" font-weight="bold" fill="var(--ink)" font-family="inherit">一句话穿过 Transformer 的完整旅程（点击记忆：每步对应一章）</text>
+
+      <!-- step 1 -->
+      <rect x="40" y="60" width="680" height="44" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="60" y="87" font-size="13" fill="var(--ink)" font-family="inherit">① 原始文本：「我 爱 学习」 → 切成 token → 查表得到词嵌入向量 <tspan fill="var(--muted)">[3 × 512]</tspan></text>
+      <rect x="600" y="68" width="110" height="28" rx="14" fill="var(--accent)"></rect>
+      <text x="655" y="87" text-anchor="middle" font-size="11" fill="var(--paper2)" font-family="inherit">第 2 章 · 词嵌入</text>
+      <line x1="380" y1="104" x2="380" y2="126" stroke="var(--ink)" stroke-width="2" marker-end="url(#arr-09d)"></line>
+
+      <!-- step 2 -->
+      <rect x="40" y="130" width="680" height="44" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="60" y="157" font-size="13" fill="var(--ink)" font-family="inherit">② 加上位置编码，让模型知道「谁在前谁在后」 <tspan fill="var(--muted)">[3 × 512] 逐元素相加</tspan></text>
+      <rect x="600" y="138" width="110" height="28" rx="14" fill="var(--accent)"></rect>
+      <text x="655" y="157" text-anchor="middle" font-size="11" fill="var(--paper2)" font-family="inherit">第 2 章 · 位置</text>
+      <line x1="380" y1="174" x2="380" y2="196" stroke="var(--ink)" stroke-width="2" marker-end="url(#arr-09d)"></line>
+
+      <!-- step 3 -->
+      <rect x="40" y="200" width="680" height="54" rx="8" fill="var(--paper2)" stroke="var(--accent2)" stroke-width="2"></rect>
+      <text x="60" y="222" font-size="13" fill="var(--ink)" font-family="inherit">③ 多头自注意力：每个词用 Q 去查所有词的 K，softmax 后对 V 加权求和</text>
+      <text x="60" y="242" font-size="11" fill="var(--muted)" font-family="inherit">softmax(Q·Kᵀ/√d_k)·V　→　8 个头各看一种关系，拼接后过 W_O　[3×512] → [3×512]</text>
+      <rect x="600" y="213" width="110" height="28" rx="14" fill="var(--accent2)"></rect>
+      <text x="655" y="232" text-anchor="middle" font-size="11" fill="var(--paper2)" font-family="inherit">第 3、4 章</text>
+      <line x1="380" y1="254" x2="380" y2="276" stroke="var(--ink)" stroke-width="2" marker-end="url(#arr-09d)"></line>
+
+      <!-- step 4 -->
+      <rect x="40" y="280" width="680" height="44" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="60" y="307" font-size="13" fill="var(--ink)" font-family="inherit">④ Add &amp; Norm + 前馈网络 FFN：残差保信号，升维 512→2048→512 做非线性加工</text>
+      <rect x="600" y="288" width="110" height="28" rx="14" fill="var(--accent)"></rect>
+      <text x="655" y="307" text-anchor="middle" font-size="11" fill="var(--paper2)" font-family="inherit">第 5 章</text>
+      <line x1="380" y1="324" x2="380" y2="346" stroke="var(--ink)" stroke-width="2" marker-end="url(#arr-09d)"></line>
+
+      <!-- step 5 -->
+      <rect x="40" y="350" width="680" height="44" rx="8" fill="var(--paper2)" stroke="var(--line)"></rect>
+      <text x="60" y="377" font-size="13" fill="var(--ink)" font-family="inherit">⑤ ③④ 组成一层，叠 6 层（或今天的 96 层）→ 编码完成；解码器再加因果掩码与交叉注意力</text>
+      <rect x="600" y="358" width="110" height="28" rx="14" fill="var(--accent)"></rect>
+      <text x="655" y="377" text-anchor="middle" font-size="11" fill="var(--paper2)" font-family="inherit">第 6 章</text>
+      <line x1="380" y1="394" x2="380" y2="416" stroke="var(--ink)" stroke-width="2" marker-end="url(#arr-09d)"></line>
+
+      <!-- step 6 -->
+      <rect x="40" y="420" width="680" height="44" rx="8" fill="var(--paper2)" stroke="var(--accent3)" stroke-width="2"></rect>
+      <text x="60" y="447" font-size="13" fill="var(--ink)" font-family="inherit">⑥ 输出层：线性映射到词表 → softmax 得概率 → 采样出下一个词，循环生成（推理）</text>
+      <rect x="600" y="428" width="110" height="28" rx="14" fill="var(--accent3)"></rect>
+      <text x="655" y="447" text-anchor="middle" font-size="11" fill="var(--paper2)" font-family="inherit">第 7、8 章</text>
+    </svg>
+    <figcaption>图 9-3　全书「一图流」：一句话从文本到生成下一个词的完整数据流。右侧色块标注每一步对应的章节，忘了哪步就回哪章。</figcaption>
+  </div>
+
+  <p>如果这张图里的每一步你都能用大白话讲给别人听——恭喜，你已经真正掌握了 Transformer 的核心。这不是客气话：能把 Q、K、V、掩码、残差、softmax 这些概念讲清楚的人，已经跨过了理解现代 AI 最难的那道门槛。</p>
+
+  <p>最后，用一段极简伪代码把「一图流」再走一遍。你会发现：九章书，其实就是这十来行：</p>
+
+  <div class="formula">
+x = 词嵌入(tokens) + 位置编码<br>
+for 层 in 1..96:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;x = x + 多头注意力(归一化(x))&nbsp;&nbsp;&nbsp;&nbsp;# Q·Kᵀ/√d_k，softmax，加因果掩码<br>
+&nbsp;&nbsp;&nbsp;&nbsp;x = x + 前馈网络(归一化(x))&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# 升维 → 激活 → 降维<br>
+logits = x[最后一个位置] · W_词表<br>
+下一个词 = 采样(softmax(logits / 温度))
+  </div>
+
+  <p>每一行你都知道它在干嘛、为什么这么干。这就是本书想给你的全部。</p>
+
+  <h3><span class="sec-no">9.9</span> 之后怎么学：一份路线图</h3>
+
+  <p>这本书给了你「地图」，接下来是「实地行走」。推荐按下面的顺序推进（具体资源链接见全书页脚的资源清单，这里只给顺序与节奏建议）：</p>
+
+  <ol>
+    <li><strong>重读原论文</strong>（1～2 周）。回头读 2017 年的《Attention Is All You Need》。你会惊讶地发现：当初天书一样的论文，现在每个公式都认识。同时可以读 BERT、GPT-3、T5 三篇论文的摘要和架构图部分，验证本章的三族划分。</li>
+    <li><strong>跟一门系统课程</strong>（1～2 学期节奏）。斯坦福 CS224n（自然语言处理）打广度和基础；CS336（从零构建大语言模型）讲现代 LLM 的全部工程细节。书 + 视频 + 作业，选一门吃透即可。</li>
+    <li><strong>手撕 nanoGPT</strong>（2～4 周，强烈推荐）。用几百行 PyTorch 从零写一个能训练、能生成文字的迷你 GPT。这是从「看懂」到「会写」的关键一跃：亲手实现掩码自注意力、KV Cache、采样之后，本书所有概念都会变成你的肌肉记忆。</li>
+    <li><strong>读 Llama 技术报告</strong>（1～2 周）。挑一份现代开源模型的技术报告精读，对照 9.6 节的速查表：RoPE 怎么实现的？GQA 分了几组？SwiGLU 的维度怎么设？你会发现现代模型没有秘密，全是本书零件的组合与调参。</li>
+    <li><strong>保持手感</strong>。之后每出一个新模型、新论文，先问三个问题：掩码长什么样？零件换了哪个？规模放了多大？——用本书的框架去拆解，你永远不会迷路。</li>
+  </ol>
+
+  <div class="callout callout-warn">
+    <p class="callout-title">常见误区</p>
+    <ul>
+      <li><strong>「BERT 比 GPT 先进 / 落后」</strong>——错。两者是不同物种：BERT 为理解而生，GPT 为生成而生，各有所长。今天「生成」赛道更火，不等于理解路线是错的。</li>
+      <li><strong>「涌现能力证明 AI 有意识了」</strong>——过度解读。涌现说的是「某些能力随规模突然可测」，它与「意识」之间没有任何已证实的桥梁，而且现象本身仍有争议。</li>
+      <li><strong>「现代 LLM 已经不是 Transformer 了」</strong>——恰恰相反。RoPE、RMSNorm、SwiGLU、GQA 全是零件升级，注意力核心公式一字未改。学会 2017 年的原版，就掌握了理解一切现代模型的钥匙。</li>
+      <li><strong>「上下文越长越好，直接拉满」</strong>——O(n²) 的代价是真实的：更长的上下文意味着更贵、更慢，且模型对长文中部的信息利用往往变差。按需选择长度，是工程常识。</li>
+    </ul>
+  </div>
+
+  <h3><span class="sec-no">9.1</span> 小结</h3>
+  <ul>
+    <li>Transformer 分化为三族：<strong>编码器-only（BERT，双向，完形填空 MLM，做理解）</strong>、<strong>解码器-only（GPT，因果掩码，下一词预测，做生成）</strong>、<strong>编码器-解码器（T5，文本到文本，做转换）</strong>。</li>
+    <li>区分三族的钥匙是<mark>注意力掩码的形状</mark>：谁能看见谁。</li>
+    <li>规模定律：损失随参数量/数据量/算力呈<mark>对数线性</mark>下降——每扩大十倍，降固定一截。GPT-3 达 175B 参数、96 层、12288 维。</li>
+    <li>涌现能力：某些能力在规模阈值附近突然出现；现象真实，解释有争议。</li>
+    <li>现代 LLM 的零件升级：RoPE、RMSNorm + Pre-LN、SwiGLU、GQA/MQA、128K+ 上下文——核心注意力公式未变。</li>
+    <li>长上下文贵在意注意力 O(n²)；FlashAttention 用「分块计算、不物化大矩阵」把显存压回 O(n)。</li>
+    <li>下一步路线：重读论文 → CS224n/CS336 → 手撕 nanoGPT → 读 Llama 技术报告。</li>
+  </ul>
+
+  <h3><span class="sec-no">9.2</span> 自测题</h3>
+
+  <details class="quiz">
+    <summary>第 1 题：为什么 BERT 不适合直接用来「续写一段话」，而 GPT 可以？</summary>
+    <p><strong>参考答案：</strong>两个原因。① 架构上，BERT 是双向编码器，训练目标是「在完整上下文里猜被盖住的词」，它没有被训练过「只看上文、预测下一个词」这件事；② 生成方式上，逐词生成要求每步只能依赖已生成的左边内容，BERT 的注意力会去看「还不存在的右边」，这在生成时无意义。GPT 的因果掩码天然匹配「从左到右逐词生成」的流程。</p>
+  </details>
+
+  <details class="quiz">
+    <summary>第 2 题：「损失随规模对数线性下降」意味着：把模型从 100 亿参数扩到 1000 亿，再扩到 1 万亿，两次扩张带来的损失下降幅度是什么关系？</summary>
+    <p><strong>参考答案：</strong>大致相同。对数线性意味着「每扩大 10 倍，损失下降固定的一小格」。100 亿 → 1000 亿是 ×10，1000 亿 → 1 万亿也是 ×10，所以两段带来的损失下降幅度大致相等。这也正是「回报递减但不停止」的含义：每一步都要花 10 倍的钱，只买同样一格进步。</p>
+  </details>
+
+  <details class="quiz">
+    <summary>第 3 题：FlashAttention 改变了注意力机制的数学定义吗？它省的是什么？</summary>
+    <p><strong>参考答案：</strong>没有改变数学定义——输出结果与标准注意力完全相同（在浮点误差范围内）。它省的是<strong>显存</strong>和<strong>显存读写时间</strong>：标准实现会把 n×n 的注意力分数矩阵完整写入显存（O(n²) 空间），FlashAttention 用分块计算 + 在线 softmax，只在高速缓存里保留小块中间结果，空间降到 O(n)，同时大幅减少了缓慢的显存访问，因此也更快。</p>
+  </details>
+
+  <details class="quiz">
+    <summary>第 4 题：为什么解码器-only 架构最终「赢下」了通用大模型竞赛，而不是看起来信息更全的编码器-解码器？</summary>
+    <p><strong>参考答案：</strong>主要是简单与规模化的胜利。① 下一词预测这一个目标就能吃下全网所有文本，不需要「输入/输出」两段式数据；② 结构少一半（没有独立编码器和交叉注意力），同样的参数量预算可以堆更多层、喂更多数据，正好踩中规模定律；③ 对话、写作、编程等主流应用本来就能写成「续写」形式，T5 式的任务前缀在解码器-only 上同样好用。编码器-解码器没有「错」，只是在通用生成这个最大战场上，更简单的形态跑赢了。</p>
+  </details>
+
+</section>

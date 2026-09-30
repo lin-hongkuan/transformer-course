@@ -1,0 +1,336 @@
+<!-- demo-ngram.html · bigram 语言模型交互玩具（供 ch01 的 .demo-frame 注入）
+     自包含：scoped style（.dz-ngram 前缀）+ HTML + IIFE script，无依赖 -->
+
+<div class="dz-ngram">
+<style>
+  .dz-ngram { font-family: inherit; color: var(--ink); }
+  .dz-ngram * { box-sizing: border-box; }
+  .dz-ngram .ng-note {
+    font-size: .82rem; color: var(--muted); margin: 0 0 12px;
+    font-family: var(--f-mono, monospace);
+  }
+  .dz-ngram .ng-grid {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    gap: 16px; margin-bottom: 14px;
+  }
+  @media (max-width: 640px) {
+    .dz-ngram .ng-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+  .dz-ngram .ng-panel {
+    border: 1px solid var(--line); border-radius: 12px;
+    background: var(--paper); padding: 12px 14px; min-width: 0;
+  }
+  .dz-ngram .ng-panel h5 {
+    margin: 0 0 8px; font-size: .8rem; font-weight: 700;
+    letter-spacing: .06em; color: var(--muted);
+    text-transform: uppercase; font-family: var(--f-mono, monospace);
+  }
+  .dz-ngram .ng-corpus {
+    font-size: .8rem; line-height: 1.75; color: var(--muted);
+    max-height: 168px; overflow-y: auto; margin: 0; padding-left: 1.2em;
+    font-family: var(--f-mono, monospace);
+  }
+  .dz-ngram .ng-corpus li b { color: var(--accent2); font-weight: 600; }
+  .dz-ngram .ng-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .dz-ngram .ng-row + .ng-row { margin-top: 8px; }
+  .dz-ngram input[type="text"] {
+    flex: 1; min-width: 120px; font: inherit; font-size: .95rem;
+    padding: 10px 12px; border-radius: 9px;
+    border: 1px solid var(--line); background: var(--paper2); color: var(--ink);
+  }
+  .dz-ngram input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .dz-ngram .ng-btn {
+    appearance: none; border: 1px solid var(--line); border-radius: 9px;
+    background: var(--paper2); color: var(--ink);
+    font: 600 .88rem/1 inherit; padding: 11px 16px; cursor: pointer;
+    transition: border-color .15s, color .15s, transform .1s;
+    min-height: 42px;
+  }
+  .dz-ngram .ng-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .dz-ngram .ng-btn:active { transform: translateY(1px); }
+  .dz-ngram .ng-btn:disabled { opacity: .45; cursor: not-allowed; }
+  .dz-ngram .ng-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .dz-ngram .ng-btn-primary:hover { color: #fff; filter: brightness(1.08); }
+  .dz-ngram .ng-bars { display: flex; flex-direction: column; gap: 7px; margin-top: 4px; }
+  .dz-ngram .ng-bar-row {
+    display: grid; grid-template-columns: 3.2em minmax(0,1fr) 4.6em;
+    gap: 9px; align-items: center; font-size: .85rem;
+  }
+  .dz-ngram .ng-bar-word { font-weight: 600; text-align: right; white-space: nowrap; }
+  .dz-ngram .ng-bar-track {
+    height: 18px; border-radius: 6px; background: var(--paper2);
+    border: 1px solid var(--line); overflow: hidden; position: relative;
+  }
+  .dz-ngram .ng-bar-fill {
+    height: 100%; width: 0%; background: var(--accent);
+    border-radius: 6px 0 0 6px; transition: width .5s cubic-bezier(.2,.7,.2,1);
+  }
+  .dz-ngram .ng-bar-pct {
+    font-family: var(--f-mono, monospace); font-size: .78rem; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .dz-ngram .ng-empty {
+    font-size: .86rem; color: var(--muted); padding: 8px 2px; line-height: 1.7;
+  }
+  .dz-ngram .ng-empty b { color: var(--accent2); }
+  .dz-ngram .ng-output {
+    margin-top: 6px; padding: 12px 14px; border-radius: 10px;
+    border: 1px dashed var(--line); background: var(--paper);
+    font-size: 1.02rem; line-height: 1.9; min-height: 56px;
+  }
+  .dz-ngram .ng-output .tok {
+    display: inline-block; padding: 1px 8px; margin: 2px 2px;
+    border-radius: 7px; background: var(--paper3);
+    border: 1px solid var(--line); font-weight: 500;
+  }
+  .dz-ngram .ng-output .tok.fresh {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+  .dz-ngram .ng-output .tok.start {
+    background: transparent; border-style: dashed; color: var(--muted);
+  }
+  .dz-ngram .ng-verdict {
+    margin-top: 10px; font-size: .85rem; color: var(--muted); line-height: 1.7;
+  }
+  .dz-ngram .ng-verdict b { color: var(--accent2); }
+  .dz-ngram .ng-err {
+    padding: 10px 12px; border-radius: 9px; font-size: .85rem;
+    border: 1px solid var(--warn-line, var(--line)); background: var(--warn-bg, var(--paper2));
+    color: var(--accent2); font-family: var(--f-mono, monospace);
+  }
+</style>
+
+<p class="ng-note">bigram 模型 · 训练语料只有下面 20 句话 · 规则：只看前一个词，查表采样</p>
+
+<div class="ng-grid">
+  <div class="ng-panel">
+    <h5>① 语料库（模型的全部"见闻"）</h5>
+    <ol class="ng-corpus" id="dz-ng-corpus"></ol>
+  </div>
+  <div class="ng-panel">
+    <h5>② 查表：输入一个词，看语料里它后面跟过什么</h5>
+    <div class="ng-row">
+      <input type="text" id="dz-ng-input" placeholder="例如：我 / 猫 / 喜欢" maxlength="6">
+      <button class="ng-btn ng-btn-primary" id="dz-ng-lookup" type="button">查表</button>
+    </div>
+    <div class="ng-bars" id="dz-ng-bars">
+      <p class="ng-empty">先输入一个词试试。模型对世界的全部认知，就是右边这张表。</p>
+    </div>
+  </div>
+</div>
+
+<div class="ng-panel">
+  <h5>③ 生成：让模型开口说话</h5>
+  <div class="ng-row">
+    <button class="ng-btn" id="dz-ng-step" type="button">单步生成</button>
+    <button class="ng-btn ng-btn-primary" id="dz-ng-auto" type="button">自动生成 8 词</button>
+    <button class="ng-btn" id="dz-ng-reset" type="button">重置</button>
+  </div>
+  <div class="ng-output" id="dz-ng-output"><span class="tok start">起点</span></div>
+  <p class="ng-verdict" id="dz-ng-verdict">每点一次，模型都会查"最后一个词"的表，按概率抽一个下一个词接上。多点几次，观察它什么时候<strong>开始原地打转</strong>、什么时候<strong>突然换了话题</strong>——它根本不记得自己刚才说过什么。</p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  try {
+    var root = document.querySelector('.dz-ngram');
+    if (!root) return;
+    var $ = function (id) { return root.querySelector('#' + id); };
+
+    /* ---- 语料：20 句简单中文句 ---- */
+    var CORPUS = [
+      '我 喜欢 吃 苹果', '我 喜欢 吃 香蕉', '我 喜欢 看 书',
+      '他 喜欢 吃 苹果', '他 喜欢 踢 足球', '她 喜欢 看 书',
+      '猫 追 老鼠', '猫 喜欢 睡觉', '猫 吃 鱼',
+      '狗 追 猫', '狗 喜欢 吃 骨头', '狗 爱 玩 球',
+      '小鸟 飞 得 很 高', '小鸟 爱 唱歌', '风 吹 过 树林',
+      '雨 落 在 屋顶 上', '孩子 喜欢 玩 球', '老师 看 书',
+      '我们 爱 学习', '我们 踢 足球'
+    ];
+
+    /* ---- 建表：bigramCounts[前词] = { 后词: 次数 } ---- */
+    var bigramCounts = {};
+    var vocab = {};
+    CORPUS.forEach(function (sent) {
+      var ws = sent.split(/\s+/);
+      for (var i = 0; i < ws.length; i++) {
+        vocab[ws[i]] = true;
+        if (i < ws.length - 1) {
+          var a = ws[i], b = ws[i + 1];
+          if (!bigramCounts[a]) bigramCounts[a] = {};
+          bigramCounts[a][b] = (bigramCounts[a][b] || 0) + 1;
+        }
+      }
+    });
+
+    /* 渲染语料列表，高亮每个句子的第一个词（可作为生成起点） */
+    var corpusEl = $('dz-ng-corpus');
+    CORPUS.forEach(function (s) {
+      var ws = s.split(/\s+/);
+      var li = document.createElement('li');
+      li.innerHTML = '<b>' + ws[0] + '</b> ' + ws.slice(1).join(' ');
+      corpusEl.appendChild(li);
+    });
+
+    /* ---- 查表面板 ---- */
+    function distOf(word) {
+      var row = bigramCounts[word];
+      if (!row) return null;
+      var total = 0, k;
+      for (k in row) total += row[k];
+      var items = [];
+      for (k in row) items.push({ word: k, p: row[k] / total });
+      items.sort(function (x, y) { return y.p - x.p; });
+      return items;
+    }
+
+    function renderBars(word) {
+      var box = $('dz-ng-bars');
+      box.innerHTML = '';
+      var items = distOf(word);
+      if (!word) {
+        box.innerHTML = '<p class="ng-empty">先输入一个词试试。</p>';
+        return;
+      }
+      if (!vocab[word]) {
+        box.innerHTML = '<p class="ng-empty"><b>“' + esc(word) + '”</b> 不在语料里——对 bigram 来说它根本不存在，概率是 0。这就是"数据稀疏"：没见过的就一无所知。</p>';
+        return;
+      }
+      if (!items) {
+        box.innerHTML = '<p class="ng-empty"><b>“' + esc(word) + '”</b> 在语料里出现过，但只在句尾，后面没有跟过任何词。模型走到这里会"卡壳"。</p>';
+        return;
+      }
+      items.forEach(function (it) {
+        var row = document.createElement('div');
+        row.className = 'ng-bar-row';
+        row.innerHTML =
+          '<span class="ng-bar-word">' + esc(it.word) + '</span>' +
+          '<span class="ng-bar-track"><span class="ng-bar-fill"></span></span>' +
+          '<span class="ng-bar-pct">' + (it.p * 100).toFixed(1) + '%</span>';
+        box.appendChild(row);
+        var fill = row.querySelector('.ng-bar-fill');
+        requestAnimationFrame(function () { fill.style.width = (it.p * 100).toFixed(1) + '%'; });
+      });
+      var hint = document.createElement('p');
+      hint.className = 'ng-empty';
+      hint.innerHTML = 'P(下一个词 | “' + esc(word) + '”)——注意：它只看了“' + esc(word) + '”这一个词。';
+      box.appendChild(hint);
+    }
+
+    function esc(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    /* ---- 生成器 ---- */
+    var generated = [];      /* 已生成的词序列 */
+    var autoTimer = null;
+
+    function sample(items) {
+      var r = Math.random(), acc = 0;
+      for (var i = 0; i < items.length; i++) {
+        acc += items[i].p;
+        if (r <= acc) return items[i].word;
+      }
+      return items[items.length - 1].word;
+    }
+
+    function renderOutput(freshIdx) {
+      var out = $('dz-ng-output');
+      out.innerHTML = '<span class="tok start">起点</span>';
+      generated.forEach(function (w, i) {
+        var sp = document.createElement('span');
+        sp.className = 'tok' + (i === freshIdx ? ' fresh' : '');
+        sp.textContent = w;
+        out.appendChild(sp);
+      });
+    }
+
+    function stopAuto() {
+      if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+      var ab = $('dz-ng-auto'), sb = $('dz-ng-step');
+      if (ab) { ab.disabled = false; ab.textContent = '自动生成 8 词'; }
+      if (sb) sb.disabled = false;
+    }
+
+    function stepOnce() {
+      var last = generated.length ? generated[generated.length - 1] : null;
+      var items = last ? distOf(last) : null;
+
+      if (!last) {
+        /* 从语料的首词集合里均匀随机挑一个起点 */
+        var starts = CORPUS.map(function (s) { return s.split(/\s+/)[0]; });
+        last = starts[Math.floor(Math.random() * starts.length)];
+        generated.push(last);
+        renderOutput(generated.length - 1);
+        return true;
+      }
+      if (!items) {
+        /* 句尾词，无后继：模型卡壳，重新起头 */
+        generated = [];
+        renderOutput(-1);
+        var v = $('dz-ng-verdict');
+        v.innerHTML = '<b>卡壳了：</b>“' + esc(last) + '”在语料里只出现在句尾，后面没有跟过任何词。bigram 不认识上下文，只能从头再来。（已自动清空，再点一次重新开始）';
+        return false;
+      }
+      var next = sample(items);
+      generated.push(next);
+      renderOutput(generated.length - 1);
+      renderBars(last);
+      $('dz-ng-input').value = last;
+
+      /* 检测原地打转：最近 6 词里出现 A B A B 循环 */
+      var n = generated.length;
+      if (n >= 4) {
+        var a = generated[n - 4], b = generated[n - 3], c = generated[n - 2], d = generated[n - 1];
+        if (a === c && b === d && a !== b) {
+          $('dz-ng-verdict').innerHTML = '<b>开始原地打转了：</b>“' + esc(a) + ' ' + esc(b) + ' ' + esc(a) + ' ' + esc(b) + '”。因为每一步只看最后一个词，只要走回见过的词，未来就和过去一模一样——它被困在循环里了。';
+        }
+      }
+      return true;
+    }
+
+    function reset() {
+      stopAuto();
+      generated = [];
+      renderOutput(-1);
+      $('dz-ng-verdict').innerHTML = '已重置。再点"单步生成"或"自动生成 8 词"重新开始。试着连玩几局：它生成的句子有时碰巧通顺，但只要足够长，几乎总会暴露——它从不记得自己说过什么。';
+    }
+
+    /* ---- 事件绑定 ---- */
+    $('dz-ng-lookup').addEventListener('click', function () {
+      renderBars($('dz-ng-input').value.trim());
+    });
+    $('dz-ng-input').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') renderBars($('dz-ng-input').value.trim());
+    });
+    $('dz-ng-step').addEventListener('click', function () { stepOnce(); });
+    $('dz-ng-reset').addEventListener('click', function () { reset(); });
+    $('dz-ng-auto').addEventListener('click', function () {
+      if (autoTimer) { stopAuto(); return; }
+      var count = 0;
+      var ab = $('dz-ng-auto');
+      ab.textContent = '停止';
+      $('dz-ng-step').disabled = true;
+      autoTimer = setInterval(function () {
+        count++;
+        var ok = stepOnce();
+        if (count >= 8 || !ok) stopAuto();
+      }, 420);
+    });
+
+    /* ---- 初始展示一组真实数字 ---- */
+    $('dz-ng-input').value = '喜欢';
+    renderBars('喜欢');
+  } catch (err) {
+    var box = document.querySelector('.dz-ngram');
+    if (box) {
+      var p = document.createElement('p');
+      p.className = 'ng-err';
+      p.textContent = '演示初始化失败：' + String((err && err.message) || err);
+      box.appendChild(p);
+    }
+  }
+})();
+</script>
+</div>

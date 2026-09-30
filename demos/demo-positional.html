@@ -1,0 +1,358 @@
+<div class="dz-pos">
+  <style>
+    .dz-pos { width: 100%; font-size: .95rem; }
+    .dz-pos .dz-tip { margin: 0 0 12px; color: var(--muted); font-size: .88rem; line-height: 1.7; }
+    .dz-pos .dz-ctl {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+      padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px;
+      background: var(--paper2); margin-bottom: 14px;
+    }
+    .dz-pos .dz-slider-wrap { display: flex; align-items: center; gap: 10px; flex: 1 1 280px; min-width: 240px; }
+    .dz-pos label { font: 600 .85rem/1 var(--f-body); color: var(--ink); white-space: nowrap; }
+    .dz-pos input[type="range"] {
+      flex: 1; min-width: 120px; height: 34px; accent-color: var(--accent); cursor: pointer;
+    }
+    .dz-pos .dz-posval {
+      font: 600 .95rem/1 var(--f-mono); color: var(--accent);
+      background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+      border-radius: 8px; padding: 7px 12px; min-width: 74px; text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+    .dz-pos .dz-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+    .dz-pos .dz-btn {
+      appearance: none; border: 1px solid var(--line); background: var(--paper);
+      color: var(--ink); border-radius: 9px; padding: 10px 14px;
+      font: 600 .83rem/1 var(--f-body); cursor: pointer; min-height: 40px;
+      transition: border-color .15s, color .15s, background .15s;
+    }
+    .dz-pos .dz-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .dz-pos .dz-btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+    .dz-pos .dz-grid {
+      display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 14px;
+    }
+    @media (max-width: 760px) { .dz-pos .dz-grid { grid-template-columns: minmax(0, 1fr); } }
+    .dz-pos .dz-card {
+      border: 1px solid var(--line); border-radius: 12px; background: var(--paper);
+      padding: 12px 10px 6px; overflow: hidden;
+    }
+    .dz-pos .dz-card h6 {
+      margin: 0 0 8px; font: 700 .8rem/1.4 var(--f-body); color: var(--muted);
+      letter-spacing: .03em; padding-left: 6px;
+    }
+    .dz-pos svg { display: block; width: 100%; height: auto; }
+    .dz-pos .dz-toggle {
+      display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+      font: 600 .83rem/1 var(--f-body); color: var(--ink); user-select: none;
+      padding: 8px 4px; min-height: 40px;
+    }
+    .dz-pos .dz-toggle input { width: 20px; height: 20px; accent-color: var(--accent); cursor: pointer; }
+    .dz-pos .dz-note {
+      margin-top: 10px; font-family: var(--f-mono); font-size: .8rem; line-height: 1.8;
+      color: var(--accent-ink); background: var(--accent-soft);
+      border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+      border-radius: 8px; padding: 9px 12px;
+    }
+    .dz-pos .dz-err {
+      color: var(--accent2); font-family: var(--f-mono); font-size: .85rem;
+      padding: 12px; border: 1px dashed var(--warn-line); border-radius: 8px;
+    }
+  </style>
+
+  <p class="dz-tip">拖动滑块改变位置 <b>pos</b>：左侧是 PE(pos) 前 16 维的条形图（蓝 = sin 维，橙 = cos 维），右侧是四条不同频率的正弦曲线，圆点标出当前 pos 在各频率上的取值。注意看：<strong>低维的波变化飞快，高维的波几乎不动</strong>——这正是「多频率钟表」。</p>
+
+  <div class="dz-ctl">
+    <div class="dz-slider-wrap">
+      <label for="dz-pos-slider">位置 pos</label>
+      <input type="range" id="dz-pos-slider" min="0" max="50" step="1" value="1">
+      <span class="dz-posval" id="dz-pos-val">1</span>
+    </div>
+    <div class="dz-btns">
+      <button class="dz-btn" id="dz-pos-play" type="button">▶ 自动播放</button>
+      <button class="dz-btn" id="dz-pos-step" type="button">单步 +1</button>
+      <button class="dz-btn" id="dz-pos-reset" type="button">↺ 重置</button>
+    </div>
+  </div>
+
+  <div class="dz-grid">
+    <div class="dz-card">
+      <h6>PE(pos) 前 16 维条形图</h6>
+      <svg id="dz-pos-bars" viewBox="0 0 380 260" role="img" aria-label="位置编码向量条形图"></svg>
+    </div>
+    <div class="dz-card">
+      <h6>不同维度的正弦波（横轴 = pos，圆点 = 当前取值）</h6>
+      <svg id="dz-pos-waves" viewBox="0 0 460 260" role="img" aria-label="不同频率的正弦曲线"></svg>
+    </div>
+  </div>
+
+  <div class="dz-card" style="margin-top:14px">
+    <h6>
+      <label class="dz-toggle">
+        <input type="checkbox" id="dz-pos-dot">
+        显示「PE(10) 与 PE(10+k) 点积随 k 变化」曲线 —— 看相对位置如何编码在点积里
+      </label>
+    </h6>
+    <div id="dz-pos-dot-wrap" style="display:none">
+      <svg id="dz-pos-dot-svg" viewBox="0 0 720 220" role="img" aria-label="相对位置点积折线图"></svg>
+      <div class="dz-note" id="dz-pos-dot-note">k = 0 时点积最大（向量与自身最相似）；k 增大时点积迅速衰减并围绕 0 振荡——注意力机制只要看点积，就能分辨「这个key离我的查询有多远」。</div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+    var ROOT = document.currentScript ? document.currentScript.parentNode : null;
+    function qs(s) { return ROOT ? ROOT.querySelector(s) : null; }
+    try {
+      function cssVar(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      }
+      var C = {
+        ink: cssVar('--ink') || '#21252E',
+        muted: cssVar('--muted') || '#61687A',
+        line: cssVar('--line') || '#D9D2C0',
+        accent: cssVar('--accent') || '#2B4BD8',
+        accent2: cssVar('--accent2') || '#E05A12',
+        accent3: cssVar('--accent3') || '#0E7D5B'
+      };
+      var NS = 'http://www.w3.org/2000/svg';
+      function el(tag, attrs) {
+        var e = document.createElementNS(NS, tag);
+        for (var k in attrs) e.setAttribute(k, attrs[k]);
+        return e;
+      }
+
+      /* d_model = 16（演示用小维度，频率规律与 512 维相同） */
+      var D_MODEL = 16;
+      function peVal(pos, dim) {
+        var i = Math.floor(dim / 2);
+        var denom = Math.pow(10000, (2 * i) / D_MODEL);
+        var phase = pos / denom;
+        return (dim % 2 === 0) ? Math.sin(phase) : Math.cos(phase);
+      }
+      function peVec(pos, d) {
+        var v = [];
+        for (var k = 0; k < d; k++) v.push(peVal(pos, k));
+        return v;
+      }
+
+      var MAX_POS = 50;
+      var pos = 1;
+
+      /* ============ 左：条形图 ============ */
+      var barsSvg = qs('#dz-pos-bars');
+      var BW = 380, BH = 260, PADB = 26, PADT = 14, PADX = 26;
+      var midY = PADT + (BH - PADT - PADB) / 2;
+      var halfH = (BH - PADT - PADB) / 2;
+      var barW = (BW - PADX * 2) / D_MODEL;
+      /* 零线 */
+      barsSvg.appendChild(el('line', { x1: PADX, y1: midY, x2: BW - PADX, y2: midY,
+        stroke: C.muted, 'stroke-width': 1 }));
+      var bars = [], barLabels = [];
+      for (var d = 0; d < D_MODEL; d++) {
+        var x = PADX + d * barW + 1.5;
+        var rect = el('rect', { x: x, y: midY, width: barW - 3, height: 0,
+          fill: d % 2 === 0 ? C.accent : C.accent2, rx: 1.5 });
+        barsSvg.appendChild(rect);
+        bars.push(rect);
+        var t = el('text', { x: x + (barW - 3) / 2, y: BH - 8, 'text-anchor': 'middle',
+          'font-size': '9.5', fill: C.muted, 'font-family': '"JetBrains Mono", monospace' });
+        t.textContent = d;
+        barsSvg.appendChild(t);
+        barLabels.push(t);
+        /* 数值标签（只给前 4 维，避免拥挤） */
+        if (d < 4) {
+          var vt = el('text', { x: x + (barW - 3) / 2, y: PADT + 4, 'text-anchor': 'middle',
+            'font-size': '9', fill: C.ink, 'font-family': '"JetBrains Mono", monospace' });
+          vt.setAttribute('data-dim', d);
+          barsSvg.appendChild(vt);
+          vt.__isVal = true;
+          barLabels.push(vt);
+        }
+      }
+      var yPlus = el('text', { x: 6, y: PADT + 6, 'font-size': '10', fill: C.muted,
+        'font-family': '"JetBrains Mono", monospace' });
+      yPlus.textContent = '+1';
+      var yMinus = el('text', { x: 6, y: PADT + halfH * 2 + 2, 'font-size': '10', fill: C.muted,
+        'font-family': '"JetBrains Mono", monospace' });
+      yMinus.textContent = '−1';
+      barsSvg.appendChild(yPlus); barsSvg.appendChild(yMinus);
+
+      /* ============ 右：波形图 ============ */
+      var wavesSvg = qs('#dz-pos-waves');
+      var WW = 460, WH = 260, PADL = 92, PADR = 14;
+      /* 选 4 个代表性维度对（频率从快到慢），用 sin 维代表 */
+      var DIMS = [
+        { dim: 0,  color: C.accent,  label: 'dim 0（i=0，分母=1）' },
+        { dim: 4,  color: C.accent2, label: 'dim 4（i=2，分母=10）' },
+        { dim: 8,  color: C.accent3, label: 'dim 8（i=4，分母=100）' },
+        { dim: 14, color: C.muted,   label: 'dim 14（i=7，分母≈3162）' }
+      ];
+      var laneH = (WH - 30) / DIMS.length;
+      var dots = [];
+      DIMS.forEach(function (dd, li) {
+        var yc = 16 + li * laneH + laneH / 2;
+        /* 泳道分隔与基线 */
+        wavesSvg.appendChild(el('line', { x1: PADL, y1: yc, x2: WW - PADR, y2: yc,
+          stroke: C.line, 'stroke-width': 1 }));
+        var lb = el('text', { x: 6, y: yc - 6, 'font-size': '10.5', fill: dd.color,
+          'font-family': '"JetBrains Mono", monospace' });
+        lb.textContent = 'dim ' + dd.dim;
+        wavesSvg.appendChild(lb);
+        var lb2 = el('text', { x: 6, y: yc + 10, 'font-size': '9.5', fill: C.muted,
+          'font-family': 'inherit' });
+        lb2.textContent = dd.label.split('（')[1].replace('）', '');
+        wavesSvg.appendChild(lb2);
+        /* 正弦路径：x 从 0 到 50 */
+        var path = '';
+        for (var px = 0; px <= MAX_POS; px += 0.5) {
+          var sx = PADL + (px / MAX_POS) * (WW - PADL - PADR);
+          var sy = yc - peVal(px, dd.dim) * (laneH / 2 - 6);
+          path += (px === 0 ? 'M' : 'L') + sx.toFixed(1) + ',' + sy.toFixed(1);
+        }
+        wavesSvg.appendChild(el('path', { d: path, fill: 'none',
+          stroke: dd.color, 'stroke-width': 2, opacity: .9 }));
+        var dot = el('circle', { cx: 0, cy: 0, r: 5.5, fill: dd.color,
+          stroke: 'var(--paper)', 'stroke-width': 1.5 });
+        wavesSvg.appendChild(dot);
+        dots.push({ dot: dot, dim: dd.dim, yc: yc });
+      });
+      /* 横轴刻度 */
+      [0, 10, 20, 30, 40, 50].forEach(function (px) {
+        var sx = PADL + (px / MAX_POS) * (WW - PADL - PADR);
+        var tx = el('text', { x: sx, y: WH - 4, 'text-anchor': 'middle', 'font-size': '10',
+          fill: C.muted, 'font-family': '"JetBrains Mono", monospace' });
+        tx.textContent = px;
+        wavesSvg.appendChild(tx);
+      });
+      /* 当前 pos 竖线 */
+      var vline = el('line', { x1: 0, y1: 10, x2: 0, y2: WH - 16, stroke: C.ink,
+        'stroke-width': 1, 'stroke-dasharray': '3 4', opacity: .55 });
+      wavesSvg.appendChild(vline);
+
+      /* ============ 点积折线 ============ */
+      var dotSvg = qs('#dz-pos-dot-svg');
+      var DW = 720, DH = 220, DPD = 34;
+      var BASE = 10;
+      var dcx = DPD, dcy = DH / 2 - 6, dcw = DW - DPD * 2, dch = DH / 2 - 40;
+      dotSvg.appendChild(el('line', { x1: dcx, y1: dcy, x2: dcx + dcw, y2: dcy,
+        stroke: C.muted, 'stroke-width': 1 }));
+      /* 预计算 dot(k) = PE(BASE)·PE(BASE+k)，k=0..40，128 维近似全维度 */
+      var DOTD = 128, KMAX = 40;
+      var baseVec = peVec(BASE, DOTD);
+      var dotsArr = [];
+      for (var k = 0; k <= KMAX; k++) {
+        var v = peVec(BASE + k, DOTD), s = 0;
+        for (var q = 0; q < DOTD; q++) s += baseVec[q] * v[q];
+        dotsArr.push(s);
+      }
+      /* 归一化到 |v|²，使 k=0 时 = 1 */
+      var norm = dotsArr[0];
+      var dpath = '';
+      var dotPts = [];
+      for (var k2 = 0; k2 <= KMAX; k2++) {
+        var dx = dcx + (k2 / KMAX) * dcw;
+        var dy = dcy - (dotsArr[k2] / norm) * dch;
+        dpath += (k2 === 0 ? 'M' : 'L') + dx.toFixed(1) + ',' + dy.toFixed(1);
+        dotPts.push({ x: dx, y: dy, k: k2 });
+      }
+      dotSvg.appendChild(el('path', { d: dpath, fill: 'none', stroke: C.accent,
+        'stroke-width': 2.4 }));
+      dotPts.forEach(function (p) {
+        dotSvg.appendChild(el('circle', { cx: p.x, cy: p.y, r: p.k % 5 === 0 ? 4 : 2.2,
+          fill: p.k === 0 ? C.accent2 : C.accent }));
+      });
+      [0, 10, 20, 30, 40].forEach(function (kk) {
+        var dx = dcx + (kk / KMAX) * dcw;
+        var tx = el('text', { x: dx, y: DH - 14, 'text-anchor': 'middle', 'font-size': '11',
+          fill: C.muted, 'font-family': '"JetBrains Mono", monospace' });
+        tx.textContent = 'k=' + kk;
+        dotSvg.appendChild(tx);
+      });
+      var lab1 = el('text', { x: dcx + 4, y: 22, 'font-size': '11.5', fill: C.accent2,
+        'font-family': 'inherit', 'font-weight': 600 });
+      lab1.textContent = 'k=0：点积 = 1（自己与自己完全同向）';
+      dotSvg.appendChild(lab1);
+      var lab2 = el('text', { x: dcx + dcw - 4, y: 22, 'text-anchor': 'end', 'font-size': '11.5',
+        fill: C.muted, 'font-family': 'inherit' });
+      lab2.textContent = '随 k 增大衰减并振荡 → 点积编码了相对距离';
+      dotSvg.appendChild(lab2);
+
+      /* ============ 渲染与控件 ============ */
+      var slider = qs('#dz-pos-slider');
+      var posVal = qs('#dz-pos-val');
+      function render() {
+        posVal.textContent = pos;
+        /* 条形图 */
+        for (var d = 0; d < D_MODEL; d++) {
+          var v = peVal(pos, d);
+          var h = v * halfH;
+          var rect = bars[d];
+          if (h >= 0) {
+            rect.setAttribute('y', midY - h);
+            rect.setAttribute('height', Math.max(h, 1.5));
+          } else {
+            rect.setAttribute('y', midY);
+            rect.setAttribute('height', Math.max(-h, 1.5));
+          }
+        }
+        /* 前 4 维数值 */
+        var vals = barsSvg.querySelectorAll('[data-dim]');
+        Array.prototype.forEach.call(vals, function (vt) {
+          var dd = parseInt(vt.getAttribute('data-dim'), 10);
+          vt.textContent = peVal(pos, dd).toFixed(2);
+        });
+        /* 波形圆点 + 竖线 */
+        var sxv = PADL + (pos / MAX_POS) * (WW - PADL - PADR);
+        vline.setAttribute('x1', sxv); vline.setAttribute('x2', sxv);
+        dots.forEach(function (o) {
+          o.dot.setAttribute('cx', sxv);
+          o.dot.setAttribute('cy', o.yc - peVal(pos, o.dim) * (laneH / 2 - 6));
+        });
+      }
+      slider.addEventListener('input', function () {
+        pos = parseInt(slider.value, 10);
+        render();
+      });
+
+      var playing = false, timer = null;
+      function stopPlay() {
+        playing = false;
+        if (timer) { clearInterval(timer); timer = null; }
+        var pb = qs('#dz-pos-play');
+        if (pb) { pb.textContent = '▶ 自动播放'; pb.classList.remove('on'); }
+      }
+      function stepFwd() {
+        pos = pos >= MAX_POS ? 0 : pos + 1;
+        slider.value = pos;
+        render();
+      }
+      qs('#dz-pos-play').addEventListener('click', function () {
+        if (playing) { stopPlay(); return; }
+        playing = true;
+        var pb = qs('#dz-pos-play');
+        pb.textContent = '⏸ 暂停'; pb.classList.add('on');
+        timer = setInterval(function () {
+          stepFwd();
+          if (pos >= MAX_POS) stopPlay();
+        }, 220);
+      });
+      qs('#dz-pos-step').addEventListener('click', function () { stopPlay(); stepFwd(); });
+      qs('#dz-pos-reset').addEventListener('click', function () {
+        stopPlay(); pos = 1; slider.value = 1; render();
+      });
+
+      /* 点积开关 */
+      qs('#dz-pos-dot').addEventListener('change', function (ev) {
+        qs('#dz-pos-dot-wrap').style.display = ev.target.checked ? '' : 'none';
+      });
+
+      render();
+    } catch (err) {
+      if (ROOT) {
+        ROOT.innerHTML = '<div class="dz-err">demo-positional 初始化失败：' +
+          String(err && err.message ? err.message : err) + '</div>';
+      }
+    }
+  })();
+  </script>
+</div>
